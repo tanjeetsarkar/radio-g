@@ -8,6 +8,7 @@ from dateutil import parser as date_parser
 
 from models.news_item import NewsItem
 from services.content_scraper import ContentScraper
+from services.deduplicator import NewsDeduplicator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class NewsFetcher:
     """Fetches news from RSS feeds with retry logic and rate limiting"""
     
-    def __init__(self, config_path: str = "config/sources.yaml"):
+    def __init__(self, config_path: str = "config/sources.yaml", use_deduplication: bool = True):
         self.config = self._load_config(config_path)
         self.scraper = ContentScraper(
             timeout=self.config['settings']['request_timeout_seconds']
@@ -25,6 +26,17 @@ class NewsFetcher:
         self.retry_delay = self.config['settings']['retry_delay_seconds']
         self.rate_limit_delay = self.config['settings']['rate_limit_delay_seconds']
         self.max_articles = self.config['settings']['max_articles_per_feed']
+        
+        # Initialize deduplicator
+        self.use_deduplication = use_deduplication
+        self.deduplicator = None
+        if use_deduplication:
+            try:
+                self.deduplicator = NewsDeduplicator()
+                logger.info("✓ Deduplication enabled")
+            except Exception as e:
+                logger.warning(f"Deduplication disabled due to error: {e}")
+                self.use_deduplication = False
         
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file"""
@@ -51,7 +63,11 @@ class NewsFetcher:
                 # Rate limiting between feeds
                 time.sleep(self.rate_limit_delay)
         
-        logger.info(f"Total articles fetched: {len(all_news)}")
+        # Apply deduplication
+        if self.use_deduplication and self.deduplicator:
+            all_news = self.deduplicator.filter_duplicates(all_news)
+        
+        logger.info(f"Total unique articles fetched: {len(all_news)}")
         return all_news
     
     def _fetch_feed_with_retry(self, feed_config: Dict, category: str) -> List[NewsItem]:
@@ -116,18 +132,14 @@ class NewsFetcher:
         # Get author
         author = entry.get('author', None)
         
-        # Scrape full content
+        # Scrape full content with fallback to description
         content = None
         image_url = None
         
         if self.scraper.is_scrapable_url(url):
-            logger.info(f"Scraping content from: {url}")
-            content, image_url = self.scraper.scrape_article(url)
-            
-            if not content:
-                # Fallback to description if scraping fails
-                content = description
+            content, image_url = self.scraper.scrape_article(url, fallback_description=description)
         else:
+            logger.info(f"Skipping scraping for: {url}")
             content = description
         
         # Try to get image from RSS if not found during scraping
@@ -170,7 +182,7 @@ class NewsFetcher:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     return dt
-                except Exception:
+                except:
                     continue
         
         # Fallback to current time
@@ -196,3 +208,17 @@ class NewsFetcher:
         return news_items
 
 
+# Example usage
+if __name__ == "__main__":
+    fetcher = NewsFetcher()
+    
+    # Fetch all news
+    all_news = fetcher.fetch_all_feeds()
+    
+    # Print sample
+    for item in all_news[:3]:
+        print(f"\n{item.source} - {item.category}")
+        print(f"Title: {item.title}")
+        print(f"URL: {item.url}")
+        print(f"Content length: {len(item.content) if item.content else 0} chars")
+        print(f"Published: {item.published_date}")
