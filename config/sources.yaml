@@ -1,0 +1,77 @@
+feeds:
+  general:
+    - url: "http://feeds.bbci.co.uk/news/world/rss.xml"
+      name: "BBC World"
+      priority: 1
+      enabled: true
+    
+    - url: "https://www.theguardian.com/world/rss"
+      name: "The Guardian World"
+      priority: 2
+      enabled: true
+    
+    - url: "https://www.aljazeera.com/xml/rss/all.xml"
+      name: "Al Jazeera"
+      priority: 3
+      enabled: true
+
+  technology:
+    - url: "https://techcrunch.com/feed/"
+      name: "TechCrunch"
+      priority: 1
+      enabled: true
+    
+    - url: "https://www.theverge.com/rss/index.xml"
+      name: "The Verge"
+      priority: 2
+      enabled: true
+    
+    - url: "https://feeds.arstechnica.com/arstechnica/index"
+      name: "Ars Technica"
+      priority: 3
+      enabled: true
+    
+    - url: "https://www.wired.com/feed/rss"
+      name: "Wired"
+      priority: 4
+      enabled: true
+
+  business:
+    - url: "https://feeds.bloomberg.com/markets/news.rss"
+      name: "Bloomberg"
+      priority: 1
+      enabled: true
+    
+    - url: "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+      name: "CNBC"
+      priority: 2
+      enabled: true
+    
+    - url: "https://www.businessinsider.com/rss"
+      name: "Business Insider"
+      priority: 3
+      enabled: true
+
+  sports:
+    - url: "http://feeds.bbci.co.uk/sport/rss.xml"
+      name: "BBC Sport"
+      priority: 1
+      enabled: true
+    
+    - url: "https://www.espn.com/espn/rss/news"
+      name: "ESPN"
+      priority: 2
+      enabled: true
+    
+    - url: "https://www.skysports.com/rss/12040"
+      name: "Sky Sports"
+      priority: 3
+      enabled: true
+
+settings:
+  fetch_interval_minutes: 15
+  retry_attempts: 2
+  retry_delay_seconds: 5
+  rate_limit_delay_seconds: 2
+  request_timeout_seconds: 30
+  max_articles_per_feed: 10
