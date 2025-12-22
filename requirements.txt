@@ -1,0 +1,31 @@
+# RSS Feed Parsing
+feedparser
+
+# Web scraping
+beautifulsoup4
+newspaper3k
+lxml
+requests
+urllib3
+
+# Date parsing
+python-dateutil
+
+# Configuration
+PyYAML
+
+# Kafka
+confluent-kafka
+
+# Redis for deduplication
+redis
+
+# Scheduling
+schedule
+
+# Logging
+python-json-logger
+
+# Testing (optional)
+pytest
+pytest-asyncio
