@@ -1,10 +1,11 @@
+# Core Dependencies
 # RSS Feed Parsing
 feedparser
 
 # Web scraping
 beautifulsoup4
 newspaper3k
-lxml
+lxml[html-clean]
 requests
 urllib3
 
@@ -26,6 +27,36 @@ schedule
 # Logging
 python-json-logger
 
-# Testing (optional)
+# Testing Dependencies
+# Core testing framework
 pytest
 pytest-asyncio
+
+# Coverage reporting
+pytest-cov
+coverage[toml]
+
+# Mocking and fixtures
+pytest-mock
+pytest-fixtures
+
+# Parallel test execution
+pytest-xdist
+
+# Test timeout handling
+pytest-timeout
+
+# Better assertions
+pytest-clarity
+
+# HTML reports
+pytest-html
+
+# Development Dependencies
+# Code formatting
+black
+isort
+
+# Linting
+flake8
+pylint
