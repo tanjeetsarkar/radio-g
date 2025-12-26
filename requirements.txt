@@ -60,3 +60,8 @@ isort
 # Linting
 flake8
 pylint
+
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
