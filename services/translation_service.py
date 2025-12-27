@@ -3,8 +3,8 @@ from typing import Dict, Optional
 from abc import ABC, abstractmethod
 import time
 import hashlib
-import json
 from pydantic import BaseModel, Field
+from google.genai.types import HttpOptions
 
 # Check for new SDK
 try:
@@ -69,7 +69,8 @@ class GeminiTranslationProvider(TranslationProvider):
         self.api_key = api_key
         self.model_name = model
         self.call_count = 0
-        self.client = genai.Client(api_key=api_key)
+        # self.client = genai.Client(api_key=api_key)
+        self.client = genai.Client(http_options=HttpOptions(api_version="v1"))
         logger.info(f"✓ Gemini Translation Provider initialized (model: {model})")
     
     def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150) -> Dict[str, str]:

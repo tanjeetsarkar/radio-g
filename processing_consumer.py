@@ -103,7 +103,7 @@ class NewsProcessingConsumer:
         self.translation_service = TranslationService(
             provider=translation_provider,
             api_key=translation_api_key,
-            model="models/gemini-2.5-pro"
+            model="gemini-2.5-flash"
         )
         
         # Initialize TTS service

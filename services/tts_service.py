@@ -57,8 +57,8 @@ class ElevenLabsTTSProvider(TTSProvider):
         # Voice IDs
         self.voices = {
             'en': 'JBFqnCBsd6RMkjVDRZzb', # George
-            'hi': 'D38z5RcWu1voky8WS1ja', # Fin
-            'bn': 'D38z5RcWu1voky8WS1ja'  # Fin
+            'hi': 'zs7UfyHqCCmny7uTxCYi', # Fin
+            'bn': 'c7VOtb2tmfLXLqWBCXlt'  # Fin
         }
         logger.info("✓ ElevenLabs Provider initialized")
 

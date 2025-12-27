@@ -19,7 +19,7 @@ def test_real_translation():
     service = TranslationService(
         provider="gemini",
         api_key=api_key,
-        model="models/gemini-flash-lite-latest"
+        model="gemini-2.5-flash"
     )
 
     # 3. Sample News Text
