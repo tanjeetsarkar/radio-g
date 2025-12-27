@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-News Processing Consumer
-Consumes from raw-news-feed, translates/summarizes, generates audio, produces to language topics
-"""
 
 import logging
 import json
@@ -15,6 +10,8 @@ from services.kafka_producer import NewsKafkaProducer
 from services.translation_service import TranslationService
 from services.tts_service import TTSService
 from models.news_item import NewsItem
+from config.config import get_config
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -364,58 +361,45 @@ def main():
     """Main entry point"""
     import argparse
     
+    # Load config to get defaults from .env
+    config = get_config()
+    
     parser = argparse.ArgumentParser(description='News Processing Consumer')
-    parser.add_argument(
-        '--mode',
-        choices=['batch', 'continuous'],
-        default='batch',
-        help='Processing mode'
-    )
-    parser.add_argument(
-        '--max',
-        type=int,
-        default=5,
-        help='Max messages to process in batch mode'
-    )
-    parser.add_argument(
-        '--kafka',
-        default='localhost:9093',
-        help='Kafka bootstrap servers'
-    )
+    parser.add_argument('--mode', choices=['batch', 'continuous'], default='batch')
+    parser.add_argument('--max', type=int, default=5)
+    parser.add_argument('--kafka', default=config.kafka.bootstrap_servers)
+    
+    # Use Config values as defaults!
     parser.add_argument(
         '--translation-provider',
         choices=['mock', 'gemini'],
-        default='mock',
+        default=config.api.translation_provider, 
         help='Translation provider'
     )
     parser.add_argument(
         '--tts-provider',
         choices=['mock', 'elevenlabs'],
-        default='mock',
+        default=config.api.tts_provider,
         help='TTS provider'
-    )
-    parser.add_argument(
-        '--output-dir',
-        default='audio_output',
-        help='Output directory for audio files'
     )
     
     args = parser.parse_args()
     
-    # Initialize consumer
+    # Initialize consumer with keys from Config
     consumer = NewsProcessingConsumer(
         kafka_bootstrap_servers=args.kafka,
         translation_provider=args.translation_provider,
         tts_provider=args.tts_provider,
-        output_dir=args.output_dir
+        # Pass keys directly from config
+        translation_api_key=config.api.gemini_api_key,
+        tts_api_key=config.api.elevenlabs_api_key,
+        output_dir=config.app.audio_output_dir
     )
     
-    # Run
     if args.mode == 'batch':
         consumer.process_batch(max_messages=args.max)
     else:
         consumer.run_continuous()
-
 
 if __name__ == "__main__":
     main()
