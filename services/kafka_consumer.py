@@ -20,6 +20,7 @@ class NewsKafkaConsumer:
         group_id: str = "news-consumer-group",
         auto_offset_reset: str = "earliest",
         manage_signals: bool = True,
+        return_raw: bool = False,
     ):
         """
         Initialize Kafka consumer
@@ -30,6 +31,7 @@ class NewsKafkaConsumer:
             auto_offset_reset: Where to start consuming ('earliest' or 'latest')
         """
         self.bootstrap_servers = bootstrap_servers
+        self.return_raw = return_raw
         self.group_id = group_id
         self.running = True
 
@@ -107,6 +109,11 @@ class NewsKafkaConsumer:
             # Parse message
             value = msg.value().decode("utf-8")
             news_data = json.loads(value)
+
+            if self.return_raw:
+                self.stats['messages_consumed'] += 1
+                return news_data
+
             news_item = NewsItem.from_dict(news_data)
 
             self.stats["messages_consumed"] += 1

@@ -94,9 +94,10 @@ def initialize_kafka_consumers():
         try:
             consumer = NewsKafkaConsumer(
                 bootstrap_servers=config.kafka.bootstrap_servers,
-                group_id=f"api-consumer-{lang}-V2",
-                auto_offset_reset="latest",
+                group_id=f"api-consumer-{lang}-V4",
+                auto_offset_reset="earliest",
                 manage_signals=False,
+                return_raw=True
             )
             consumer.subscribe([topic])
             kafka_consumers[lang] = consumer
@@ -118,9 +119,10 @@ def fetch_latest_news(language: str, max_items: int = 20) -> List[ProcessedNewsI
     items = []
 
     # Consume available messages
-    for _ in range(max_items):
+    for i in range(max_items):
+        timeout = 1.0 if i == 0 else 0.5
         try:
-            msg = consumer.consume_message(timeout=0.5)
+            msg = consumer.consume_message(timeout=timeout)
             logger.info(f"Got Message: {msg}")
             if msg is None:
                 break
