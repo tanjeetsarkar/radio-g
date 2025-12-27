@@ -3,174 +3,125 @@ from typing import Dict, Optional
 from abc import ABC, abstractmethod
 import time
 import hashlib
+from pydantic import BaseModel, Field
+
+# Check for new SDK
+try:
+    from google import genai
+    from google.genai import types
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# --- Data Models for Structured Output ---
+class TranslationOutput(BaseModel):
+    summary: str = Field(description="A concise summary of the article in English")
+    translated_summary: str = Field(description="The summary translated into the target language")
+    target_language: str = Field(description="The language code of the translation")
 
 
 class TranslationProvider(ABC):
     """Abstract base class for translation providers"""
     
     @abstractmethod
-    def translate(self, text: str, target_language: str, source_language: str = "auto") -> str:
-        """Translate text to target language"""
+    def translate(self, text: str, target_language: str) -> str:
         pass
     
     @abstractmethod
     def summarize(self, text: str, max_length: int = 150) -> str:
-        """Summarize text to specified length"""
         pass
     
     @abstractmethod
-    def translate_and_summarize(
-        self, 
-        text: str, 
-        target_language: str,
-        max_length: int = 150
-    ) -> Dict[str, str]:
-        """Translate and summarize in one call (more efficient)"""
+    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150) -> Dict[str, str]:
         pass
 
 
 class MockTranslationProvider(TranslationProvider):
-    """
-    Mock translation provider for development
-    Returns placeholder text without actual API calls
-    """
+    """Mock provider for testing without API costs"""
     
     def __init__(self):
         self.call_count = 0
-        logger.info("✓ Mock Translation Provider initialized (no API key needed)")
+        logger.info("✓ Mock Translation Provider initialized")
     
-    def translate(self, text: str, target_language: str, source_language: str = "auto") -> str:
-        """Mock translation - returns modified text with language marker"""
+    def translate(self, text: str, target_language: str) -> str:
         self.call_count += 1
-        
-        # Simulate API delay
         time.sleep(0.1)
-        
-        # Add language marker to show it was "translated"
-        language_markers = {
-            'en': '[EN]',
-            'hi': '[HI-हिंदी]',
-            'bn': '[BN-বাংলা]'
-        }
-        
-        marker = language_markers.get(target_language, f'[{target_language.upper()}]')
-        
-        # Keep first 200 chars and add marker
-        translated = f"{marker} {text[:200]}..."
-        
-        logger.debug(f"Mock translated to {target_language}: {text[:50]}...")
-        return translated
+        return f"[{target_language.upper()}] {text[:50]}..."
     
     def summarize(self, text: str, max_length: int = 150) -> str:
-        """Mock summarization - returns truncated text"""
         self.call_count += 1
-        
-        # Simulate API delay
         time.sleep(0.1)
-        
-        # Simple truncation with ellipsis
-        if len(text) <= max_length:
-            summary = text
-        else:
-            # Try to break at sentence
-            summary = text[:max_length].rsplit('.', 1)[0] + '...'
-        
-        logger.debug(f"Mock summarized: {len(text)} -> {len(summary)} chars")
-        return summary
+        return text[:max_length] + "..."
     
-    def translate_and_summarize(
-        self, 
-        text: str, 
-        target_language: str,
-        max_length: int = 150
-    ) -> Dict[str, str]:
-        """Mock translation + summarization"""
+    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150) -> Dict[str, str]:
         self.call_count += 1
-        
-        # Simulate API delay
         time.sleep(0.15)
-        
-        # First summarize, then translate
         summary = self.summarize(text, max_length)
-        translated_summary = self.translate(summary, target_language)
-        
         return {
-            'original': text,
+            'original': text[:50],
             'summary': summary,
-            'translated_summary': translated_summary,
+            'translated_summary': f"[{target_language.upper()}] {summary}",
             'target_language': target_language,
-            'source_language': 'en',  # Mock detected language
             'provider': 'mock'
         }
 
 
 class GeminiTranslationProvider(TranslationProvider):
     """
-    Real Gemini API provider (placeholder for later)
-    TODO: Implement when API key is available
+    Real Gemini Provider using the latest Google Gen AI SDK (v1.0+)
+    Ref: https://github.com/googleapis/python-genai
     """
     
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
-        """
-        Initialize Gemini API client
-        
-        Args:
-            api_key: Gemini API key
-            model: Model to use (gemini-1.5-flash or gemini-1.5-pro)
-        """
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+        if not GEMINI_AVAILABLE:
+            raise ImportError("google-genai package not installed. Run 'uv add google-genai'")
+
         self.api_key = api_key
-        self.model = model
+        self.model_name = model
         self.call_count = 0
         
-        # TODO: Initialize actual Gemini client
-        # import google.generativeai as genai
-        # genai.configure(api_key=api_key)
-        # self.client = genai.GenerativeModel(model)
+        # Initialize the V1 Client
+        self.client = genai.Client(api_key=api_key)
         
         logger.info(f"✓ Gemini Translation Provider initialized (model: {model})")
     
-    def translate(self, text: str, target_language: str, source_language: str = "auto") -> str:
-        """
-        Translate using Gemini API
-        
-        TODO: Implement actual API call
-        """
+    def translate(self, text: str, target_language: str) -> str:
         self.call_count += 1
         
-        # TODO: Replace with actual Gemini API call
-        # prompt = f"Translate the following text to {target_language}:\n\n{text}"
-        # response = self.client.generate_content(prompt)
-        # return response.text
+        prompt = f"Translate the following text into {target_language}. Return ONLY the translation."
         
-        # For now, fallback to mock
-        logger.warning("Gemini API not implemented yet, using mock")
-        mock = MockTranslationProvider()
-        return mock.translate(text, target_language, source_language)
-    
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, text],
+                config=types.GenerateContentConfig(
+                    temperature=0.3
+                )
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini Translation Error: {e}")
+            raise
+
     def summarize(self, text: str, max_length: int = 150) -> str:
-        """
-        Summarize using Gemini API
-        
-        TODO: Implement actual API call
-        """
         self.call_count += 1
         
-        # TODO: Replace with actual Gemini API call
-        # prompt = f"""Summarize the following news article in approximately {max_length} characters.
-        # Make it suitable for a radio broadcast (30-60 seconds when spoken).
-        # Keep the most important information.
+        prompt = f"Summarize this into a radio script approx {max_length} characters long."
         
-        # Article: {text}
-        # """
-        # response = self.client.generate_content(prompt)
-        # return response.text
-        
-        # For now, fallback to mock
-        logger.warning("Gemini API not implemented yet, using mock")
-        mock = MockTranslationProvider()
-        return mock.summarize(text, max_length)
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, text],
+                config=types.GenerateContentConfig(
+                    temperature=0.3
+                )
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini Summarization Error: {e}")
+            raise
     
     def translate_and_summarize(
         self, 
@@ -179,58 +130,59 @@ class GeminiTranslationProvider(TranslationProvider):
         max_length: int = 150
     ) -> Dict[str, str]:
         """
-        Translate and summarize in one Gemini API call (more efficient)
-        
-        TODO: Implement actual API call
+        Uses Gemini's Structured Output (Schema) feature for 100% reliable JSON.
         """
         self.call_count += 1
         
-        # TODO: Replace with actual Gemini API call
-        # prompt = f"""Process this news article for a multilingual radio broadcast:
+        prompt = f"""
+        You are a news editor. 
+        1. Summarize the article for a radio broadcast (approx {max_length} chars).
+        2. Translate that summary into {target_language}.
+        """
         
-        # 1. Summarize to approximately {max_length} characters (30-60 seconds when read)
-        # 2. Translate the summary to {target_language}
-        # 3. Make it engaging and suitable for audio broadcast
-        
-        # Article: {text}
-        
-        # Respond in JSON format:
-        # {{
-        #   "summary": "English summary",
-        #   "translated_summary": "Translated summary",
-        #   "target_language": "{target_language}"
-        # }}
-        # """
-        # response = self.client.generate_content(prompt)
-        # result = json.loads(response.text)
-        
-        # For now, fallback to mock
-        logger.warning("Gemini API not implemented yet, using mock")
-        mock = MockTranslationProvider()
-        return mock.translate_and_summarize(text, target_language, max_length)
+        try:
+            # New V1 SDK Pattern: Pass the Pydantic model directly to response_schema
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, text],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=TranslationOutput, # Strict Schema Enforcement
+                    temperature=0.2
+                )
+            )
+            
+            # The SDK automatically handles JSON parsing if we used a schema
+            # We can parse the JSON string into our Pydantic model
+            if not response.text:
+                raise ValueError("Empty response from Gemini")
+                
+            data = TranslationOutput.model_validate_json(response.text)
+            
+            return {
+                'original': text[:100] + "...",
+                'summary': data.summary,
+                'translated_summary': data.translated_summary,
+                'target_language': data.target_language,
+                'provider': 'gemini'
+            }
+            
+        except Exception as e:
+            logger.error(f"Gemini Translate & Summarize Error: {e}")
+            raise
 
 
 class TranslationService:
-    """
-    Main translation service that manages providers
-    Easy to switch between mock and real providers
-    """
+    """Service Factory"""
     
     def __init__(
         self, 
         provider: str = "mock",
         api_key: Optional[str] = None,
-        model: str = "gemini-1.5-flash"
+        model: str = "gemini-2.0-flash" 
     ):
-        """
-        Initialize translation service
-        
-        Args:
-            provider: 'mock' or 'gemini'
-            api_key: API key for real provider
-            model: Model to use for Gemini
-        """
         self.provider_name = provider
+        self.cache = {}
         
         if provider == "mock":
             self.provider = MockTranslationProvider()
@@ -243,117 +195,17 @@ class TranslationService:
         else:
             raise ValueError(f"Unknown provider: {provider}")
         
-        # Cache for translations (optional optimization)
-        self.cache = {}
-        
-        logger.info(f"✓ Translation Service initialized with provider: {provider}")
+        logger.info(f"✓ Translation Service initialized: {provider}")
     
-    def _get_cache_key(self, text: str, target_language: str, operation: str) -> str:
-        """Generate cache key for translation"""
-        data = f"{operation}:{target_language}:{text[:100]}"
-        return hashlib.md5(data.encode()).hexdigest()
-    
-    def translate(
-        self, 
-        text: str, 
-        target_language: str, 
-        source_language: str = "auto",
-        use_cache: bool = True
-    ) -> str:
-        """Translate text with optional caching"""
-        
-        if use_cache:
-            cache_key = self._get_cache_key(text, target_language, "translate")
-            if cache_key in self.cache:
-                logger.debug("Using cached translation")
-                return self.cache[cache_key]
-        
-        result = self.provider.translate(text, target_language, source_language)
-        
-        if use_cache:
-            self.cache[cache_key] = result
-        
-        return result
-    
-    def summarize(self, text: str, max_length: int = 150, use_cache: bool = True) -> str:
-        """Summarize text with optional caching"""
-        
-        if use_cache:
-            cache_key = self._get_cache_key(text, "summary", f"summarize_{max_length}")
-            if cache_key in self.cache:
-                logger.debug("Using cached summary")
-                return self.cache[cache_key]
-        
-        result = self.provider.summarize(text, max_length)
-        
-        if use_cache:
-            self.cache[cache_key] = result
-        
-        return result
-    
-    def translate_and_summarize(
-        self, 
-        text: str, 
-        target_language: str,
-        max_length: int = 150,
-        use_cache: bool = True
-    ) -> Dict[str, str]:
-        """Translate and summarize in one call"""
-        
-        if use_cache:
-            cache_key = self._get_cache_key(
-                text, target_language, f"translate_summarize_{max_length}"
-            )
-            if cache_key in self.cache:
-                logger.debug("Using cached translation+summary")
-                return self.cache[cache_key]
-        
+    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 200) -> Dict[str, str]:
+        # Simple caching
+        key = hashlib.md5(f"{text[:50]}:{target_language}".encode()).hexdigest()
+        if key in self.cache:
+            return self.cache[key]
+            
         result = self.provider.translate_and_summarize(text, target_language, max_length)
-        
-        if use_cache:
-            self.cache[cache_key] = result
-        
+        self.cache[key] = result
         return result
     
-    def get_stats(self) -> Dict:
-        """Get service statistics"""
-        return {
-            'provider': self.provider_name,
-            'total_calls': self.provider.call_count,
-            'cache_size': len(self.cache)
-        }
-
-
-# Example usage
-if __name__ == "__main__":
-    # Mock provider (for development)
-    service = TranslationService(provider="mock")
-    
-    sample_text = """
-    Breaking news: Tech giant announces revolutionary AI breakthrough.
-    The company unveiled a new artificial intelligence system that can 
-    understand and generate human-like responses in multiple languages.
-    This development marks a significant milestone in the field of AI research.
-    """
-    
-    print("=== MOCK TRANSLATION SERVICE ===\n")
-    
-    # Test translation
-    print("1. Translation to Hindi:")
-    hindi = service.translate(sample_text, "hi")
-    print(f"{hindi}\n")
-    
-    # Test summarization
-    print("2. Summarization:")
-    summary = service.summarize(sample_text, max_length=100)
-    print(f"{summary}\n")
-    
-    # Test combined
-    print("3. Translate + Summarize (Bengali):")
-    result = service.translate_and_summarize(sample_text, "bn", max_length=120)
-    print(f"Summary: {result['summary']}")
-    print(f"Translated: {result['translated_summary']}\n")
-    
-    # Stats
-    print("4. Service Stats:")
-    print(service.get_stats())
+    def get_stats(self):
+        return {'provider': self.provider_name, 'total_calls': self.provider.call_count}

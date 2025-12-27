@@ -66,7 +66,7 @@ class NewsProcessingConsumer:
         tts_provider: str = "mock",
         translation_api_key: Optional[str] = None,
         tts_api_key: Optional[str] = None,
-        target_languages: List[str] = None,
+        target_languages: Optional[List[str]] = None,
         output_dir: str = "audio_output"
     ):
         """
