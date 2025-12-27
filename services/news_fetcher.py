@@ -117,11 +117,26 @@ class NewsFetcher:
     
     def _parse_entry(self, entry, source: str, category: str) -> Optional[NewsItem]:
         """Parse a single RSS entry into NewsItem"""
-        
+        # Helper to support both dict-like and attribute-like feed entries
+        def _get(e, key, default=None):
+            # Prefer mapping-style get() when available and callable
+            try:
+                g = getattr(e, 'get', None)
+                if callable(g):
+                    return g(key, default)
+            except Exception:
+                pass
+
+            # Fallback to attribute access
+            try:
+                return getattr(e, key, default)
+            except Exception:
+                return default
+
         # Extract basic fields
-        title = entry.get('title', '').strip()
-        description = entry.get('summary', entry.get('description', '')).strip()
-        url = entry.get('link', '')
+        title = (_get(entry, 'title') or '').strip()
+        description = (_get(entry, 'summary') or _get(entry, 'description') or '').strip()
+        url = _get(entry, 'link') or ''
         
         if not title or not url:
             return None
@@ -130,7 +145,7 @@ class NewsFetcher:
         published_date = self._parse_date(entry)
         
         # Get author
-        author = entry.get('author', None)
+        author = _get(entry, 'author', None)
         
         # Scrape full content with fallback to description
         content = None
@@ -173,7 +188,15 @@ class NewsFetcher:
         date_fields = ['published', 'pubDate', 'updated', 'created']
         
         for field in date_fields:
-            date_str = entry.get(field)
+            # Support both mapping and attribute access
+            date_str = None
+            try:
+                if hasattr(entry, 'get'):
+                    date_str = entry.get(field)
+                else:
+                    date_str = getattr(entry, field, None)
+            except Exception:
+                date_str = getattr(entry, field, None)
             if date_str:
                 try:
                     # Try parsing with dateutil
@@ -182,7 +205,7 @@ class NewsFetcher:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     return dt
-                except:
+                except Exception:
                     continue
         
         # Fallback to current time

@@ -102,7 +102,8 @@ class NewsProcessingConsumer:
         logger.info(f"Initializing Translation Service ({translation_provider})...")
         self.translation_service = TranslationService(
             provider=translation_provider,
-            api_key=translation_api_key
+            api_key=translation_api_key,
+            model="models/gemini-2.5-pro"
         )
         
         # Initialize TTS service

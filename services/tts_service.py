@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Optional, Dict
 from abc import ABC, abstractmethod
 import time
@@ -20,12 +21,31 @@ class TTSProvider(ABC):
         pass
 
 class MockTTSProvider(TTSProvider):
+    def __init__(self):
+        self.call_count = 0
+
     def save_speech(self, text: str, output_path: str, language: str) -> str:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        # Create empty file
+        # Create empty file (placeholder audio)
         with open(output_path, 'wb') as f:
             f.write(b'')
-        return output_path
+
+        # Create metadata file alongside audio
+        word_count = len(text.split())
+        estimated_duration = (word_count / 150) * 60
+        metadata = {
+            'language': language,
+            'estimated_duration_seconds': round(estimated_duration, 2)
+        }
+        meta_path = Path(output_path).with_suffix('.json')
+        with open(meta_path, 'w') as mf:
+            json.dump(metadata, mf)
+
+        self.call_count += 1
+        return str(output_path)
+
+    def get_stats(self) -> Dict:
+        return {'calls': self.call_count}
 
 class ElevenLabsTTSProvider(TTSProvider):
     def __init__(self, api_key: str, model: str = "eleven_multilingual_v2"):
@@ -70,6 +90,7 @@ class TTSService:
         self.provider_name = provider
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
+        self.call_count = 0
         
         if provider == "elevenlabs":
             if not api_key:
@@ -84,7 +105,26 @@ class TTSService:
         if not filename:
             filename = f"audio_{language}_{int(time.time())}.mp3"
         output_path = self.output_dir / filename
-        return self.provider.save_speech(text, str(output_path), language)
+        out = self.provider.save_speech(text, str(output_path), language)
+        try:
+            self.call_count += 1
+        except Exception:
+            pass
+        return out
+    
+    def batch_generate(self, texts: dict, language: str) -> Dict[str, str]:
+        """Generate multiple audio files from a dict of key->text"""
+        results = {}
+        for key, txt in texts.items():
+            filename = f"{key}_{language}.mp3"
+            results[key] = self.save_speech(txt, language, filename=filename)
+        return results
         
     def get_stats(self):
-        return {'provider': self.provider_name}
+        # Prefer provider-level stats if available
+        try:
+            provider_stats = self.provider.get_stats()
+        except Exception:
+            provider_stats = {}
+
+        return {'provider': self.provider_name, 'total_calls': self.call_count, 'stats': provider_stats}

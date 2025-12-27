@@ -40,10 +40,18 @@ class MockTranslationProvider(TranslationProvider):
         self.call_count += 1
         time.sleep(0.1)
         summary = text[:max_length] + "..."
+        # Provide human-friendly language markers to match legacy tests
+        lang_markers = {
+            'hi': '[HI-हिंदी]',
+            'bn': '[BN-বাংলা]',
+            'en': '[EN]'
+        }
+        marker = lang_markers.get(target_language, f"[{target_language.upper()}]")
+
         return {
             'original': text[:50],
             'summary': summary,
-            'translated_summary': f"[{target_language.upper()}] {summary}",
+            'translated_summary': f"{marker} {summary}",
             'target_language': target_language,
             'provider': 'mock'
         }
@@ -107,6 +115,7 @@ class TranslationService:
     def __init__(self, provider: str = "mock", api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
         self.provider_name = provider
         self.cache = {}
+        self.call_count = 0
         
         if provider == "gemini":
             if not api_key:
@@ -124,8 +133,37 @@ class TranslationService:
             return self.cache[key]
             
         result = self.provider.translate_and_summarize(text, target_language, max_length)
+        # increment call counters
+        try:
+            self.provider.call_count += 1
+        except Exception:
+            pass
+        self.call_count += 1
+
         self.cache[key] = result
         return result
     
     def get_stats(self):
-        return {'provider': self.provider_name, 'stats': self.provider.get_stats()}
+        provider_stats = {}
+        try:
+            provider_stats = self.provider.get_stats()
+        except Exception:
+            provider_stats = {}
+
+        return {
+            'provider': self.provider_name,
+            'total_calls': self.call_count,
+            'cache_size': len(self.cache),
+            'stats': provider_stats
+        }
+
+    # Backwards-compatible helpers expected by older tests
+    def translate(self, text: str, target_language: str) -> str:
+        """Return translated summary string (convenience wrapper)"""
+        out = self.translate_and_summarize(text, target_language)
+        return out.get('translated_summary', '')
+
+    def summarize(self, text: str, max_length: int = 150) -> str:
+        """Return summary string (convenience wrapper)"""
+        out = self.translate_and_summarize(text, target_language='en', max_length=max_length)
+        return out.get('summary', '')

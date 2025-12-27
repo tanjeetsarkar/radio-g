@@ -9,3 +9,5 @@ wheels/
 # Virtual environments
 .venv
 audio_output*
+test_audio_output*
+.github/copilot-instructions.md
