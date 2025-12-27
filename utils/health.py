@@ -4,7 +4,7 @@ Health check utilities for production monitoring
 
 import logging
 from typing import Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import redis
 from confluent_kafka.admin import AdminClient
 
@@ -21,7 +21,7 @@ class HealthChecker:
     ):
         self.redis_client = redis_client
         self.kafka_config = kafka_config
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
     
     def check_redis(self) -> Dict:
         """Check Redis connectivity"""
@@ -160,7 +160,7 @@ class HealthChecker:
     
     def get_uptime(self) -> Dict:
         """Get service uptime"""
-        uptime = datetime.utcnow() - self.start_time
+        uptime = datetime.now(timezone.utc) - self.start_time
         
         return {
             "start_time": self.start_time.isoformat(),
@@ -186,7 +186,7 @@ class HealthChecker:
         
         return {
             "status": "healthy" if all_healthy else "degraded",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "uptime": uptime_info,
             "checks": {
                 "redis": redis_health,

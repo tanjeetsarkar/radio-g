@@ -6,7 +6,7 @@ Consumes from raw-news-feed, translates/summarizes, generates audio, produces to
 
 import logging
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
@@ -64,8 +64,8 @@ class NewsProcessingConsumer:
         kafka_bootstrap_servers: str = "localhost:9093",
         translation_provider: str = "mock",
         tts_provider: str = "mock",
-        translation_api_key: str = None,
-        tts_api_key: str = None,
+        translation_api_key: Optional[str] = None,
+        tts_api_key: Optional[str] = None,
         target_languages: List[str] = None,
         output_dir: str = "audio_output"
     ):
