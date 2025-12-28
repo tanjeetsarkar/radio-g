@@ -2,7 +2,7 @@ import pytest
 import time
 import json
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
 from services.translation_service import TranslationService
 from services.tts_service import TTSService
@@ -134,13 +134,12 @@ class TestTTSServiceIntegration:
 class TestProcessingConsumerInitialization:
     """Test processing consumer initialization"""
     
-    def test_consumer_initialization(self, test_config, check_kafka):
+    def test_consumer_initialization(self, test_config, check_kafka, mock_language_manager):
         """Test processing consumer initializes correctly"""
         consumer = NewsProcessingConsumer(
             kafka_bootstrap_servers=test_config['kafka_servers'],
             translation_provider='mock',
             tts_provider='mock',
-            target_languages=['en', 'hi', 'bn'],
             output_dir='test_audio_output'
         )
         
@@ -148,11 +147,10 @@ class TestProcessingConsumerInitialization:
         assert consumer.producer is not None
         assert consumer.translation_service is not None
         assert consumer.tts_service is not None
-        assert consumer.target_languages == ['en', 'hi', 'bn']
         
         consumer.shutdown()
     
-    def test_consumer_statistics(self, test_config, check_kafka):
+    def test_consumer_statistics(self, test_config, check_kafka, mock_language_manager):
         """Test getting consumer statistics"""
         consumer = NewsProcessingConsumer(
             kafka_bootstrap_servers=test_config['kafka_servers'],
@@ -243,10 +241,16 @@ class TestProcessingConsumerEndToEnd:
         test_config,
         check_kafka,
         sample_news_item,
-        temp_dir
+        temp_dir,
+        mock_language_manager
     ):
         """Test processing a single news item"""
         from news_pipeline import NewsPipeline
+        
+        # Only enable 'en' for this test to speed it up
+        mock_language_manager.get_config.return_value = {
+            'en': {'name': 'English', 'enabled': True, 'voice_id': 'voice_en'}
+        }
         
         # Mock fetcher to return sample data
         mock_fetch.return_value = [sample_news_item]
@@ -270,7 +274,6 @@ class TestProcessingConsumerEndToEnd:
             kafka_bootstrap_servers=test_config['kafka_servers'],
             translation_provider='mock',
             tts_provider='mock',
-            target_languages=['en'],
             output_dir=str(temp_dir)
         )
         
@@ -282,7 +285,6 @@ class TestProcessingConsumerEndToEnd:
         consumer.shutdown()
         
         # Should have processed at least something
-        # (timing might make this flaky, so be lenient)
         assert processed_count >= 0
         assert stats['messages_processed'] >= 0
     
@@ -290,12 +292,18 @@ class TestProcessingConsumerEndToEnd:
         self,
         test_config,
         check_kafka,
-        temp_dir
+        temp_dir,
+        mock_language_manager
     ):
         """Test processing a batch of news items"""
         from services.kafka_producer import NewsKafkaProducer
         from datetime import datetime, timezone
         
+        # Configure only 'en'
+        mock_language_manager.get_config.return_value = {
+            'en': {'name': 'English', 'enabled': True, 'voice_id': 'voice_en'}
+        }
+
         # Create test news items
         items = []
         for i in range(3):
@@ -325,13 +333,12 @@ class TestProcessingConsumerEndToEnd:
             kafka_bootstrap_servers=test_config['kafka_servers'],
             translation_provider='mock',
             tts_provider='mock',
-            target_languages=['en'],
             output_dir=str(temp_dir)
         )
         
         processed = consumer.process_batch(max_messages=3)
         
-        stats = consumer.get_stats()
+        consumer.get_stats()
         
         consumer.shutdown()
         
@@ -343,7 +350,6 @@ class TestProcessingConsumerEndToEnd:
         audio_files = list(audio_dir.glob('*.mp3'))
         
         # Should have created some audio files
-        # (lenient check due to timing)
         assert len(audio_files) >= 0
 
 
@@ -357,14 +363,21 @@ class TestProcessingConsumerLogic:
         test_config,
         check_kafka,
         sample_news_item,
-        temp_dir
+        temp_dir,
+        mock_language_manager
     ):
         """Test that processing creates output for all target languages"""
+        # Ensure 3 languages are enabled
+        mock_language_manager.get_config.return_value = {
+            'en': {'name': 'English', 'enabled': True},
+            'hi': {'name': 'Hindi', 'enabled': True},
+            'bn': {'name': 'Bengali', 'enabled': True}
+        }
+
         consumer = NewsProcessingConsumer(
             kafka_bootstrap_servers=test_config['kafka_servers'],
             translation_provider='mock',
             tts_provider='mock',
-            target_languages=['en', 'hi', 'bn'],
             output_dir=str(temp_dir)
         )
         
@@ -391,14 +404,14 @@ class TestProcessingConsumerLogic:
         self,
         test_config,
         check_kafka,
-        temp_dir
+        temp_dir,
+        mock_language_manager
     ):
         """Test producing processed items to language topics"""
         consumer = NewsProcessingConsumer(
             kafka_bootstrap_servers=test_config['kafka_servers'],
             translation_provider='mock',
             tts_provider='mock',
-            target_languages=['en'],
             output_dir=str(temp_dir)
         )
         
@@ -439,7 +452,8 @@ class TestProcessingConsumerErrorHandling:
         self,
         test_config,
         check_kafka,
-        temp_dir
+        temp_dir,
+        mock_language_manager
     ):
         """Test consumer handles news items with missing content"""
         from datetime import datetime, timezone
@@ -460,7 +474,6 @@ class TestProcessingConsumerErrorHandling:
             kafka_bootstrap_servers=test_config['kafka_servers'],
             translation_provider='mock',
             tts_provider='mock',
-            target_languages=['en'],
             output_dir=str(temp_dir)
         )
         
@@ -471,42 +484,3 @@ class TestProcessingConsumerErrorHandling:
         assert len(processed) > 0
         
         consumer.shutdown()
-
-
-# Helper function for manual testing
-def run_manual_processing_test():
-    """Helper for manual processing testing"""
-    print("\n" + "="*60)
-    print("MANUAL PROCESSING TEST")
-    print("="*60)
-    
-    print("\n[1/3] Testing translation service...")
-    translation = TranslationService(provider='mock')
-    
-    text = "Breaking news: Technology company launches new AI product."
-    result = translation.translate_and_summarize(text, 'hi', max_length=100)
-    
-    print(f"  Original: {text[:50]}...")
-    print(f"  Summary: {result['summary'][:50]}...")
-    print(f"  Translated: {result['translated_summary'][:50]}...")
-    
-    print("\n[2/3] Testing TTS service...")
-    tts = TTSService(provider='mock', output_dir='test_audio_output')
-    
-    audio_path = tts.save_speech(result['translated_summary'], 'hi')
-    print(f"  Audio saved: {audio_path}")
-    
-    print("\n[3/3] Checking files...")
-    from pathlib import Path
-    audio_dir = Path('test_audio_output')
-    files = list(audio_dir.glob('*.mp3'))
-    print(f"  Audio files: {len(files)}")
-    print(f"  Metadata files: {len(list(audio_dir.glob('*.json')))}")
-    
-    print("\n" + "="*60)
-    print("✓ Processing test complete")
-    print("="*60)
-
-
-if __name__ == "__main__":
-    run_manual_processing_test()

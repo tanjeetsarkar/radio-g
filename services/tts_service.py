@@ -55,21 +55,22 @@ class ElevenLabsTTSProvider(TTSProvider):
         self.client = ElevenLabs(api_key=api_key)
         self.model = model
         # Voice IDs
-        self.voices = {
-            'en': 'JBFqnCBsd6RMkjVDRZzb', # George
-            'hi': 'zs7UfyHqCCmny7uTxCYi', # Fin
-            'bn': 'c7VOtb2tmfLXLqWBCXlt'  # Fin
-        }
+        # self.voices = {
+        #     'en': 'JBFqnCBsd6RMkjVDRZzb', # George
+        #     'hi': 'zs7UfyHqCCmny7uTxCYi', # Fin
+        #     'bn': 'c7VOtb2tmfLXLqWBCXlt'  # Fin
+        # }
         logger.info("✓ ElevenLabs Provider initialized")
 
-    def save_speech(self, text: str, output_path: str, language: str) -> str:
-        voice_id = self.voices.get(language, self.voices['en'])
+    def save_speech(self, text: str, output_path: str, language: str, voice_id: Optional[str] = None) -> str:
+        # voice_id = self.voices.get(language, self.voices['en'])
+        final_voice_id = voice_id or 'JBFqnCBsd6RMkjVDRZzb'
         
         try:
             logger.info(f"Generating ElevenLabs audio ({language})...")
             audio_generator = self.client.text_to_speech.convert(
                 text=text,
-                voice_id=voice_id,
+                voice_id=final_voice_id,
                 model_id=self.model
             )
             
@@ -101,11 +102,15 @@ class TTSService:
         else:
             self.provider = MockTTSProvider()
 
-    def save_speech(self, text: str, language: str, filename: Optional[str] = None) -> str:
+    def save_speech(self, text: str, language: str, filename: Optional[str] = None, voice_id: Optional[str] = None) -> str:
         if not filename:
             filename = f"audio_{language}_{int(time.time())}.mp3"
         output_path = self.output_dir / filename
-        out = self.provider.save_speech(text, str(output_path), language)
+        # out = self.provider.save_speech(text, str(output_path), language)
+        if isinstance(self.provider, ElevenLabsTTSProvider):
+             out = self.provider.save_speech(text, str(output_path), language, voice_id=voice_id)
+        else:
+             out = self.provider.save_speech(text, str(output_path), language)
         try:
             self.call_count += 1
         except Exception:

@@ -5,7 +5,6 @@ Located at: tests/test_translation_tts.py
 
 import pytest
 from pathlib import Path
-import json
 
 from services.translation_service import (
     TranslationService,
@@ -231,6 +230,18 @@ class TestTTSService:
         )
         
         assert "custom_audio.mp3" in result_path
+
+    def test_service_save_with_voice_id(self, temp_dir):
+        """Test saving with custom voice ID (new feature)"""
+        service = TTSService(provider="mock", output_dir=str(temp_dir))
+        
+        result_path = service.save_speech(
+            "Test text",
+            "hi",
+            voice_id="custom-voice-id"
+        )
+        
+        assert Path(result_path).exists()
     
     def test_service_batch_generate(self, temp_dir):
         """Test batch audio generation"""
@@ -283,10 +294,10 @@ class TestGeminiPlaceholder:
         """Test that Gemini provider falls back to mock when not implemented"""
         # This would normally fail without API key, but should fall back
         try:
-            provider = GeminiTranslationProvider("fake-api-key")
+            GeminiTranslationProvider("fake-api-key")
             # If it doesn't raise, the placeholder is working
             assert True
-        except:
+        except Exception:
             # Expected during development
             pytest.skip("Gemini not implemented yet")
 
@@ -298,9 +309,9 @@ class TestElevenLabsPlaceholder:
     def test_elevenlabs_falls_back_to_mock(self, temp_dir):
         """Test that ElevenLabs provider falls back to mock when not implemented"""
         try:
-            provider = ElevenLabsTTSProvider("fake-api-key", str(temp_dir))
+            ElevenLabsTTSProvider("fake-api-key", str(temp_dir))
             # If it doesn't raise, the placeholder is working
             assert True
-        except:
+        except Exception:
             # Expected during development
             pytest.skip("ElevenLabs not implemented yet")

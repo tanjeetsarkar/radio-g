@@ -1,5 +1,6 @@
 import sys
 import os
+from unittest.mock import patch, Mock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -31,6 +32,25 @@ def test_config():
         'kafka_servers': 'localhost:9093',
         'test_db': 15,  # Use separate Redis DB for testing
     }
+
+
+# ============================================================================
+# Mocks & Fixtures for Dynamic Services
+# ============================================================================
+
+@pytest.fixture
+def mock_language_manager():
+    """Mock the LanguageManager to return a standard config"""
+    with patch('services.language_manager.get_language_manager') as mock_get:
+        manager = Mock()
+        # Default test config matching the previous hardcoded values
+        manager.get_config.return_value = {
+            'en': {'name': 'English', 'flag': '🇬🇧', 'voice_id': 'voice_en', 'enabled': True},
+            'hi': {'name': 'Hindi', 'flag': '🇮🇳', 'voice_id': 'voice_hi', 'enabled': True},
+            'bn': {'name': 'Bengali', 'flag': '🇧🇩', 'voice_id': 'voice_bn', 'enabled': True}
+        }
+        mock_get.return_value = manager
+        yield manager
 
 
 # ============================================================================

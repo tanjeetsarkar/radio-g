@@ -22,7 +22,8 @@ export interface Playlist {
 export interface Language {
   code: string;
   name: string;
+  flag: string; // Added flag property
   items: number;
 }
 
-export type LanguageCode = 'en' | 'hi' | 'bn';
+export type LanguageCode = string;

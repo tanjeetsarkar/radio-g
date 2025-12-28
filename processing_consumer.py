@@ -9,6 +9,7 @@ from services.kafka_consumer import NewsKafkaConsumer
 from services.kafka_producer import NewsKafkaProducer
 from services.translation_service import TranslationService
 from services.tts_service import TTSService
+from services.language_manager import get_language_manager
 from models.news_item import NewsItem
 from config.config import get_config
 
@@ -22,7 +23,7 @@ class ProcessedNewsItem:
     """Processed news item with translations and audio"""
     
     # Original data
-    original_id: str
+    original_id: Optional[str]
     original_title: str
     original_url: str
     category: str
@@ -83,7 +84,10 @@ class NewsProcessingConsumer:
         logger.info("="*80)
         
         # Default languages
-        self.target_languages = target_languages or ['en', 'hi', 'bn']
+        logger.info("Initializing Language manager")
+        self.language_manager = get_language_manager()
+        logger.info("✓ Successfully initialized Language manager")
+        # self.target_languages = target_languages or ['en', 'hi', 'bn']
         
         # Initialize Kafka consumer
         logger.info("Initializing Kafka Consumer...")
@@ -118,11 +122,11 @@ class NewsProcessingConsumer:
         self.stats = {
             'messages_processed': 0,
             'messages_failed': 0,
-            'by_language': {lang: 0 for lang in self.target_languages}
+            'by_language': {lang: 0 for lang in self.language_manager.get_language_list()}
         }
         
         logger.info("✓ Processing Consumer initialized")
-        logger.info(f"  Target languages: {', '.join(self.target_languages)}")
+        logger.info(f"  Target languages: {', '.join(self.language_manager.get_language_list())}")
         logger.info("="*80 + "\n")
     
     def process_news_item(self, news_item: NewsItem) -> List[ProcessedNewsItem]:
@@ -137,6 +141,8 @@ class NewsProcessingConsumer:
         """
         processed_items = []
         
+        languages_config = self.language_manager.get_config()
+
         logger.info(f"\n{'='*60}")
         logger.info(f"Processing: {news_item.title[:60]}...")
         logger.info(f"Source: {news_item.source} | Category: {news_item.category}")
@@ -145,15 +151,17 @@ class NewsProcessingConsumer:
         # Use content or description
         text_to_process = news_item.content or news_item.description
         
-        for language in self.target_languages:
+        for lang_code, config in languages_config.items():
+            if not config.get('enabled', True):
+                continue
             try:
-                logger.info(f"\n[{language.upper()}] Processing...")
+                logger.info(f"\n[{lang_code.upper()}] Processing...")
                 
                 # Step 1: Translate and summarize
-                logger.info(f"  → Translating and summarizing...")
+                logger.info("  → Translating and summarizing...")
                 result = self.translation_service.translate_and_summarize(
                     text=text_to_process,
-                    target_language=language,
+                    target_language=lang_code,
                     max_length=200  # ~30-60 seconds when spoken
                 )
                 
@@ -161,12 +169,14 @@ class NewsProcessingConsumer:
                 logger.info(f"  ✓ Summary ({len(translated_summary)} chars)")
                 
                 # Step 2: Generate audio
-                logger.info(f"  → Generating audio...")
-                audio_filename = f"news_{news_item.id}_{language}.mp3"
+                voice_id = config.get('voice_id')
+                logger.info(f"  → Generating audio in {lang_code}: {voice_id}...")
+                audio_filename = f"news_{news_item.id}_{lang_code}.mp3"
                 audio_path = self.tts_service.save_speech(
                     text=translated_summary,
-                    language=language,
-                    filename=audio_filename
+                    language=lang_code,
+                    filename=audio_filename,
+                    voice_id = voice_id
                 )
                 logger.info(f"  ✓ Audio saved: {audio_path}")
                 
@@ -182,7 +192,7 @@ class NewsProcessingConsumer:
                     category=news_item.category,
                     source=news_item.source,
                     published_date=news_item.published_date.isoformat(),
-                    language=language,
+                    language=lang_code,
                     summary=result['summary'],
                     translated_summary=translated_summary,
                     audio_file=audio_path,
@@ -193,12 +203,12 @@ class NewsProcessingConsumer:
                 )
                 
                 processed_items.append(processed_item)
-                self.stats['by_language'][language] += 1
+                self.stats['by_language'][lang_code] += 1
                 
-                logger.info(f"  ✓ [{language.upper()}] Processing complete")
+                logger.info(f"  ✓ [{lang_code.upper()}] Processing complete")
                 
             except Exception as e:
-                logger.error(f"  ✗ [{language.upper()}] Processing failed: {e}")
+                logger.error(f"  ✗ [{lang_code.upper()}] Processing failed: {e}")
                 self.stats['messages_failed'] += 1
         
         return processed_items
@@ -210,18 +220,24 @@ class NewsProcessingConsumer:
         Args:
             processed_items: List of processed news items
         """
-        topic_mapping = {
-            'en': 'news-english',
-            'hi': 'news-hindi',
-            'bn': 'news-bengali'
-        }
+        # topic_mapping = {
+        #     'en': 'news-english',
+        #     'hi': 'news-hindi',
+        #     'bn': 'news-bengali'
+        # }
         
         for item in processed_items:
-            topic = topic_mapping.get(item.language)
-            if not topic:
-                logger.warning(f"No topic mapping for language: {item.language}")
-                continue
+            # topic = topic_mapping.get(item.language)
+            # if not topic:
+            #     logger.warning(f"No topic mapping for language: {item.language}")
+            #     continue
             
+            lang_config = self.language_manager.get_config().get(item.language, {})
+            lang_name = lang_config.get('name', item.language).lower()
+            topic = f"news-{lang_name}"
+
+            logger.info(f"Producing processed news in topic: {topic}")
+
             try:
                 # Convert to JSON
                 message_value = item.to_json()

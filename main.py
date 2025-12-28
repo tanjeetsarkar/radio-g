@@ -1,18 +1,20 @@
 import redis
+import uuid
+from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 
 # Add parent directory to path for imports
-
 from services.kafka_consumer import NewsKafkaConsumer
 from processing_consumer import ProcessedNewsItem
+from services.language_manager import get_language_manager
 from config.config import get_config
 from config.logging_config import setup_logging, get_logger
 from utils.health import HealthChecker
@@ -28,8 +30,8 @@ logger = get_logger(__name__)
 app = FastAPI(
     title="Multilingual News Radio API",
     description="Production API for streaming multilingual news broadcasts",
-    version="1.0.0",
-    docs_url="/docs" if not config.is_production() else None,  # Disable docs in prod
+    version="2.0.0",
+    docs_url="/docs" if not config.is_production() else None,
     redoc_url="/redoc" if not config.is_production() else None,
 )
 
@@ -74,89 +76,103 @@ class HealthResponse(BaseModel):
     environment: str
 
 
-# In-memory cache for news items
-news_cache: dict[str, List[ProcessedNewsItem]] = {"en": [], "hi": [], "bn": []}
+# Globals
+# Dynamic in-memory cache: { "en": [items], "es": [items] }
+news_cache: Dict[str, List[ProcessedNewsItem]] = defaultdict(list)
 
-# Kafka consumers (one per language)
-kafka_consumers: dict[str, NewsKafkaConsumer] = {}
+# Single Kafka consumer for all languages (using regex subscription)
+kafka_consumer: Optional[NewsKafkaConsumer] = None
+
+# Language Manager for dynamic config
+language_manager = get_language_manager()
 
 # Health checker
 health_checker: Optional[HealthChecker] = None
 
 
 def initialize_kafka_consumers():
-    """Initialize Kafka consumers for each language"""
-    topic_mapping = {"en": "news-english", "hi": "news-hindi", "bn": "news-bengali"}
+    """
+    Initialize a single Kafka consumer that subscribes to all language topics.
+    Uses a unique group ID per instance to ensure every API worker builds a full cache.
+    """
+    global kafka_consumer
 
-    kafka_config = config.kafka.connection_config
+    # Generate unique group ID for this worker/instance
+    # This ensures Fan-Out pattern: every API instance gets all messages
+    unique_group_id = f"api-consumer-{uuid.uuid4().hex[:8]}"
 
-    for lang, topic in topic_mapping.items():
+    try:
+        kafka_consumer = NewsKafkaConsumer(
+            bootstrap_servers=config.kafka.bootstrap_servers,
+            group_id=unique_group_id,
+            auto_offset_reset="earliest",  # Start from beginning to build cache
+            manage_signals=False,
+            return_raw=True,
+        )
+
+        # Subscribe to all topics starting with 'news-'
+        # Note: This requires the regex support in confluent-kafka
+        kafka_consumer.subscribe(["^news-.*"])
+
+        logger.info(f"✓ Initialized dynamic consumer (Group: {unique_group_id})")
+        logger.info("  Subscribed to pattern: ^news-.*")
+
+    except Exception as e:
+        logger.error(f"Failed to initialize consumer: {e}", exc_info=True)
+
+
+def update_cache(max_messages: int = 50):
+    """
+    Consume a batch of messages from any language topic and update the cache.
+    This runs blindly on the single consumer stream.
+    """
+    if not kafka_consumer:
+        logger.warning("Kafka consumer not initialized")
+        return
+
+    messages_processed = 0
+
+    # Consume a batch of messages
+    for _ in range(max_messages):
         try:
-            consumer = NewsKafkaConsumer(
-                bootstrap_servers=config.kafka.bootstrap_servers,
-                group_id=f"api-consumer-{lang}-V4",
-                auto_offset_reset="earliest",
-                manage_signals=False,
-                return_raw=True
-            )
-            consumer.subscribe([topic])
-            kafka_consumers[lang] = consumer
-            logger.info(f"✓ Initialized consumer for {lang} ({topic})")
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize consumer for {lang}: {e}", exc_info=True
-            )
+            # Poll with short timeout
+            msg = kafka_consumer.consumer.poll(0.1)
 
-
-def fetch_latest_news(language: str, max_items: int = 20) -> List[ProcessedNewsItem]:
-    """Fetch latest news from Kafka for a language"""
-    if language not in kafka_consumers:
-        logger.warning(f"No consumer for language: {language}")
-        return []
-
-
-    consumer = kafka_consumers[language]
-    items = []
-
-    # Consume available messages
-    for i in range(max_items):
-        timeout = 1.0 if i == 0 else 0.5
-        try:
-            msg = consumer.consume_message(timeout=timeout)
-            logger.info(f"Got Message: {msg}")
             if msg is None:
                 break
 
-            # Parse the ProcessedNewsItem from JSON
-            if isinstance(msg, dict):
-                item = ProcessedNewsItem.from_dict(msg)
-            else:
+            if msg.error():
                 continue
 
-            items.append(item)
+            # Parse message
+            value = msg.value().decode("utf-8")
+            data = json.loads(value)
+
+            # Convert to object
+            item = ProcessedNewsItem.from_dict(data)
+
+            # Add to appropriate language bucket
+            # We rely on the 'language' field in the message
+            lang_code = item.language
+
+            # Deduplicate by ID in the list (simple check)
+            # In a high-perf scenario, use a dict or set for checking existence
+            existing_ids = {x.original_id for x in news_cache[lang_code]}
+
+            if item.original_id not in existing_ids:
+                news_cache[lang_code].append(item)
+                # Sort by date descending
+                news_cache[lang_code].sort(key=lambda x: x.published_date, reverse=True)
+                # Keep only latest 50
+                news_cache[lang_code] = news_cache[lang_code][:50]
+                messages_processed += 1
 
         except Exception as e:
-            logger.error(f"Error consuming message for {language}: {e}")
-            break
+            logger.error(f"Error processing message: {e}")
+            continue
 
-    return items
-
-
-def update_cache(language: str):
-    """Update cache with latest news"""
-    try:
-        new_items = fetch_latest_news(language, max_items=20)
-        logger.info(f"new items: {new_items}")
-        if new_items:
-            # Add to cache
-            news_cache[language].extend(new_items)
-
-            # Keep only latest 50 items
-            news_cache[language] = news_cache[language][-50:]
-
-            logger.info(f"Updated {language} cache: {len(new_items)} new items")
-    except Exception as e:
-        logger.error(f"Error updating cache for {language}: {e}", exc_info=True)
+    if messages_processed > 0:
+        logger.info(f"Cache updated: processed {messages_processed} new items")
 
 
 # Middleware for request logging
@@ -164,51 +180,29 @@ def update_cache(language: str):
 async def log_requests(request: Request, call_next):
     """Log all requests"""
     start_time = datetime.utcnow()
-
     response = await call_next(request)
-
     duration = (datetime.utcnow() - start_time).total_seconds()
 
-    logger.info(
-        "Request completed",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_seconds": round(duration, 3),
-            "client_host": request.client.host if request.client else None,
-        },
-    )
-
+    # Skip health check logging to reduce noise
+    if request.url.path not in ["/health", "/live", "/ready"]:
+        logger.info(
+            "Request completed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_seconds": round(duration, 3),
+                "client_host": request.client.host if request.client else None,
+            },
+        )
     return response
-
-
-# Exception handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler"""
-    logger.error(
-        f"Unhandled exception: {exc}",
-        exc_info=True,
-        extra={"method": request.method, "path": request.url.path},
-    )
-
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal server error",
-            "message": str(exc) if not config.is_production() else "An error occurred",
-        },
-    )
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
-    logger.info("Starting Multilingual News Radio API...")
+    logger.info("Starting Multilingual News Radio API (Dynamic)...")
     logger.info(f"Environment: {config.environment}")
-    logger.info(f"Kafka: {config.kafka.bootstrap_servers}")
-    logger.info(f"Redis: {config.redis.host}:{config.redis.port}")
 
     try:
         initialize_kafka_consumers()
@@ -219,7 +213,7 @@ async def startup_event():
             db=config.redis.db,
             password=config.redis.password,
             ssl=config.redis.ssl,
-            decode_responses=True,  # Optional: makes responses strings instead of bytes
+            decode_responses=True,
         )
 
         # Initialize health checker
@@ -228,9 +222,9 @@ async def startup_event():
             redis_client=redis_client, kafka_config=config.kafka.connection_config
         )
 
-        # Load initial cache
-        for lang in ["en", "hi", "bn"]:
-            update_cache(lang)
+        # Initial cache warm-up (try to fetch existing history)
+        logger.info("Warming up cache...")
+        update_cache(max_messages=200)
 
         logger.info("✓ API ready")
     except Exception as e:
@@ -242,31 +236,29 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down API...")
-
-    for consumer in kafka_consumers.values():
-        try:
-            consumer.close()
-        except Exception as e:
-            logger.error(f"Error closing consumer: {e}")
-
+    if kafka_consumer:
+        kafka_consumer.close()
     logger.info("✓ API shutdown complete")
 
 
 @app.get("/")
 async def root():
-    """API root"""
+    """API root with dynamic language list"""
+    # Get enabled languages dynamically
+    lang_config = language_manager.get_config()
+    available_langs = [
+        code for code, cfg in lang_config.items() if cfg.get("enabled", True)
+    ]
+
     return {
         "name": "Multilingual News Radio API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "environment": config.environment,
-        "languages": ["en", "hi", "bn"],
+        "languages": available_langs,
         "endpoints": {
             "health": "/health",
-            "readiness": "/ready",
-            "liveness": "/live",
             "playlist": "/playlist/{language}",
             "audio": "/audio/{filename}",
-            "refresh": "/refresh/{language}",
             "languages": "/languages",
         },
     }
@@ -277,37 +269,33 @@ async def health_check():
     """Comprehensive health check"""
     if health_checker:
         health = health_checker.full_health_check()
-        logger.info(f"health : {health}")
         return {
             "status": health["status"],
             "timestamp": health["timestamp"],
-            "version": "1.0.0",
+            "version": "2.0.0",
             "environment": config.environment,
         }
-
     return {
         "status": "unknown",
         "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0",
+        "version": "2.0.0",
         "environment": config.environment,
     }
 
 
 @app.get("/ready")
 async def readiness_check():
-    """Kubernetes/Cloud Run readiness probe"""
+    """Readiness probe"""
     if health_checker and health_checker.readiness_check():
         return {"status": "ready"}
-
     raise HTTPException(status_code=503, detail="Service not ready")
 
 
 @app.get("/live")
 async def liveness_check():
-    """Kubernetes/Cloud Run liveness probe"""
+    """Liveness probe"""
     if health_checker and health_checker.liveness_check():
         return {"status": "alive"}
-
     raise HTTPException(status_code=503, detail="Service not alive")
 
 
@@ -318,14 +306,18 @@ async def get_playlist(
     category: Optional[str] = None,
 ):
     """Get playlist for a specific language"""
-    if language not in ["en", "hi", "bn"]:
+    # Validate language against dynamic config
+    lang_config = language_manager.get_config()
+    if language not in lang_config:
+        # Check if it's a valid code but maybe just not explicitly configured?
+        # For safety, we only allow configured languages
         raise HTTPException(
-            status_code=400, detail="Invalid language. Use: en, hi, or bn"
+            status_code=404, detail=f"Language '{language}' not configured or not found"
         )
 
     try:
-        # Update cache with latest items
-        update_cache(language)
+        # Trigger an update check (pull fresh messages)
+        update_cache(max_messages=20)
 
         # Get items from cache
         items = news_cache[language]
@@ -337,7 +329,7 @@ async def get_playlist(
             ]
 
         # Limit items
-        items = items[-limit:]
+        items = items[:limit]
 
         # Convert to response format
         response_items = []
@@ -359,8 +351,6 @@ async def get_playlist(
                 )
             )
 
-        logger.info(f"Served playlist for {language}: {len(response_items)} items")
-
         return PlaylistResponse(
             language=language, total_items=len(response_items), items=response_items
         )
@@ -373,30 +363,24 @@ async def get_playlist(
 async def get_audio(filename: str):
     """Stream audio file"""
     try:
-        # Audio files are in audio_output directory
         audio_dir = Path(config.app.audio_output_dir)
         audio_path = audio_dir / filename
 
         if not audio_path.exists():
             raise HTTPException(status_code=404, detail="Audio file not found")
 
-        # Check if it's a real audio file or mock
+        # Handle mock files for dev/testing
         if audio_path.stat().st_size == 0:
-            # Mock file - return metadata instead
             metadata_path = audio_path.with_suffix(".json")
             if metadata_path.exists():
                 with open(metadata_path, "r") as f:
                     metadata = json.load(f)
-
                 return {
-                    "message": "Mock audio file (development mode)",
+                    "message": "Mock audio file",
                     "filename": filename,
                     "metadata": metadata,
                 }
-            else:
-                raise HTTPException(status_code=404, detail="Audio file is empty")
 
-        # Return real audio file
         return FileResponse(audio_path, media_type="audio/mpeg", filename=filename)
     except HTTPException:
         raise
@@ -407,39 +391,47 @@ async def get_audio(filename: str):
 
 @app.get("/refresh/{language}")
 async def refresh_playlist(language: str):
-    """Manually refresh playlist for a language"""
-    if language not in ["en", "hi", "bn"]:
-        raise HTTPException(status_code=400, detail="Invalid language")
-
+    """Manually trigger playlist refresh (pulls from Kafka)"""
     try:
-        update_cache(language)
+        # We consume from the shared stream
+        update_cache(max_messages=50)
 
         return {
-            "message": f"Refreshed {language} playlist",
-            "items_count": len(news_cache[language]),
+            "message": "Refreshed cache (scanned 50 messages)",
+            "items_in_cache": len(news_cache[language]),
         }
     except Exception as e:
-        logger.error(f"Error refreshing {language}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to refresh playlist")
+        logger.error(f"Error refreshing: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to refresh")
 
 
 @app.get("/languages")
 async def get_languages():
-    """Get available languages with item counts"""
-    return {
-        "languages": [
-            {"code": "en", "name": "English", "items": len(news_cache["en"])},
-            {"code": "hi", "name": "Hindi", "items": len(news_cache["hi"])},
-            {"code": "bn", "name": "Bengali", "items": len(news_cache["bn"])},
-        ]
-    }
+    """Get available languages with dynamic metadata and item counts"""
+    config = language_manager.get_config()
+    response = []
+
+    for code, details in config.items():
+        if details.get("enabled", True):
+            response.append(
+                {
+                    "code": code,
+                    "name": details.get("name", code.title()),
+                    "flag": details.get("flag", "🌐"),
+                    "items": len(news_cache[code]),
+                }
+            )
+
+    # Sort by name
+    response.sort(key=lambda x: x["name"])
+
+    return {"languages": response}
 
 
 if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("PORT", "8000"))
-
     uvicorn.run(
         app,
         host="0.0.0.0",

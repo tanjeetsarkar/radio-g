@@ -1,26 +1,46 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Radio, RefreshCw, Globe } from 'lucide-react';
 import AudioPlayer from '@/components/AudioPlayer';
 import LanguageSelector from '@/components/LanguageSelector';
 import PlaylistView from '@/components/PlaylistView';
 import { newsApi } from '@/lib/api';
-import type { NewsItem, LanguageCode } from '@/types';
+import type { NewsItem, LanguageCode, Language } from '@/types';
 
 export default function Home() {
+  // Initialize with a default or empty, but we will fetch real list immediately
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>('en');
+  const [languages, setLanguages] = useState<Language[]>([]);
   const [playlist, setPlaylist] = useState<NewsItem[]>([]);
   const [currentTrack, setCurrentTrack] = useState<NewsItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load playlist when language changes
+  // 1. Fetch available languages on mount
   useEffect(() => {
-    loadPlaylist();
-  }, [selectedLanguage]);
+    loadLanguages();
+  }, []);
 
-  const loadPlaylist = async () => {
+
+
+  const loadLanguages = async () => {
+    try {
+      const data = await newsApi.getLanguages();
+      setLanguages(data);
+      
+      // If the currently selected language isn't in the fetched list (e.g. first load)
+      // default to the first available one, or keep 'en' if it exists.
+      const hasSelected = data.some(l => l.code === selectedLanguage);
+      if (!hasSelected && data.length > 0) {
+        setSelectedLanguage(data[0].code);
+      }
+    } catch (err) {
+      console.error('Failed to load languages:', err);
+    }
+  };
+
+  const loadPlaylist = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -38,12 +58,20 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedLanguage, currentTrack]);
+
+    // 2. Load playlist when language changes
+  useEffect(() => {
+    if (selectedLanguage) {
+      loadPlaylist();
+    }
+  }, [selectedLanguage, loadPlaylist]);
 
   const handleRefresh = async () => {
     try {
+      // Refresh both playlist and language stats (item counts)
       await newsApi.refreshPlaylist(selectedLanguage);
-      await loadPlaylist();
+      await Promise.all([loadPlaylist(), loadLanguages()]);
     } catch (err) {
       console.error('Error refreshing playlist:', err);
     }
@@ -116,6 +144,7 @@ export default function Home() {
               </div>
               <LanguageSelector
                 selectedLanguage={selectedLanguage}
+                languages={languages} // Pass dynamic languages
                 onLanguageChange={setSelectedLanguage}
               />
             </div>
