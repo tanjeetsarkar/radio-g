@@ -1,158 +1,385 @@
-# Complete Setup Guide
+# 🛠️ Complete Setup Guide
+
+> Step-by-step guide to set up Multilingual News Radio locally using uv
+
+**Target**: Local Development Environment  
+**Last Updated**: December 28, 2024
+
+---
+
+## 📋 Table of Contents
+
+1. [Prerequisites](#-prerequisites)
+2. [Quick Start (5 Minutes)](#-quick-start-5-minutes)
+3. [Detailed Setup](#-detailed-setup)
+4. [Environment Configuration](#-environment-configuration)
+5. [Running the Application](#-running-the-application)
+6. [Development Workflow](#-development-workflow)
+7. [Troubleshooting](#-troubleshooting)
+
+---
 
 ## 📦 Prerequisites
 
 ### Required Software
 
-- **Python 3.13+**
-- **uv** - Fast Python package manager
-- **Docker & Docker Compose**
-- **Node.js 20+** and npm
-- **Git**
+Install these before starting:
+
+#### 1. Python 3.13+
+
+```bash
+# macOS (using Homebrew)
+brew install python@3.13
+
+# Ubuntu/Debian
+sudo apt update
+sudo apt install python3.13 python3.13-venv
+
+# Windows
+# Download from: https://www.python.org/downloads/
+# ✅ Check "Add Python to PATH" during installation
+
+# Verify installation
+python3.13 --version  # Should show: Python 3.13.x
+```
+
+#### 2. uv (Fast Python Package Manager)
+
+```bash
+# macOS/Linux (recommended)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Alternative: Using pip
+pip install uv
+
+# Alternative: Using Homebrew (macOS)
+brew install uv
+
+# Verify installation
+uv --version  # Should show: uv x.x.x
+```
+
+**💡 Why uv?**
+- 10-100x faster than pip
+- Better dependency resolution
+- Built-in virtual environment management
+- Zero configuration needed
+
+#### 3. Docker Desktop
+
+```bash
+# macOS/Windows: Download from
+https://www.docker.com/products/docker-desktop
+
+# Ubuntu/Debian
+sudo apt install docker.io docker-compose
+
+# Start Docker
+sudo systemctl start docker  # Linux
+# Or open Docker Desktop app (macOS/Windows)
+
+# Verify
+docker --version
+docker-compose --version
+```
+
+#### 4. Node.js 20+ (for frontend)
+
+```bash
+# macOS (using Homebrew)
+brew install node@20
+
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# Windows: Download from
+https://nodejs.org/
+
+# Verify
+node --version  # Should be v20.x.x or higher
+npm --version
+```
 
 ### API Keys
 
-You'll need:
-1. **Google Gemini API Key** - Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. **ElevenLabs API Key** - Get from [ElevenLabs](https://elevenlabs.io/)
+Get these keys (free tier available):
 
-## 🚀 Installation Steps
+1. **Google Gemini API**: [makersuite.google.com](https://makersuite.google.com/app/apikey)
+2. **ElevenLabs API**: [elevenlabs.io](https://elevenlabs.io/) → Account → API Keys
 
-### 1. Install uv Package Manager
+---
 
-uv is a fast Python package manager written in Rust. Install it:
+## ⚡ Quick Start (5 Minutes)
 
-**macOS/Linux:**
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-**Windows (PowerShell):**
-```powershell
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-**Alternative (using pip):**
-```bash
-pip install uv
-```
-
-Verify installation:
-```bash
-uv --version
-```
-
-### 2. Clone Repository
+For the impatient developer:
 
 ```bash
+# 1. Clone repository
 git clone <repository-url>
-cd news-aggregator
-```
+cd multilingual-news-radio
 
-### 3. Setup Python Environment with uv
-
-```bash
-# Create virtual environment using uv
+# 2. Setup Python environment
 uv venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# Activate virtual environment
-# macOS/Linux:
-source .venv/bin/activate
-
-# Windows:
-.venv\Scripts\activate
-
-# Your prompt should now show (.venv)
-```
-
-### 4. Install Python Dependencies
-
-**Option A: Using requirements.txt**
-```bash
-uv pip install -r requirements.txt
-```
-
-**Option B: Using pyproject.toml (recommended)**
-```bash
-# Install all dependencies including dev dependencies
+# 3. Install dependencies
 uv sync
 
-# Install only production dependencies
+# 4. Start infrastructure
+docker-compose up -d
+
+# 5. Configure environment
+cp .env.example .env
+# Edit .env with your API keys (nano/vim/code .env)
+
+# 6. Seed language configuration
+uv run python scripts/seed_languages.py
+
+# 7. Run backend (3 terminals)
+# Terminal 1:
+uv run python news_pipeline.py --mode once
+
+# Terminal 2:
+uv run python processing_consumer.py --mode batch --max 5
+
+# Terminal 3:
+uv run python main.py
+
+# 8. Run frontend (new terminal)
+cd frontend
+npm install
+npm run dev
+
+# 9. Open browser
+# Frontend: http://localhost:3000
+# API: http://localhost:8000/docs
+```
+
+---
+
+## 🔧 Detailed Setup
+
+### Step 1: Clone Repository
+
+```bash
+# Using HTTPS
+git clone https://github.com/yourusername/multilingual-news-radio.git
+
+# Or using SSH
+git clone git@github.com:yourusername/multilingual-news-radio.git
+
+# Navigate to project
+cd multilingual-news-radio
+
+# Verify you're in the right directory
+ls -la
+# Should see: config/, services/, frontend/, docker-compose.yml, etc.
+```
+
+### Step 2: Python Environment Setup with uv
+
+#### Create Virtual Environment
+
+```bash
+# Create virtual environment (in .venv/)
+uv venv
+
+# The command creates:
+# - .venv/ directory
+# - Python 3.13 interpreter
+# - pip, setuptools included
+```
+
+#### Activate Virtual Environment
+
+```bash
+# macOS/Linux
+source .venv/bin/activate
+
+# Windows (Command Prompt)
+.venv\Scripts\activate.bat
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Verify activation (prompt should show (.venv))
+which python  # Should point to .venv/bin/python
+python --version  # Should be 3.13.x
+```
+
+**💡 Tip**: Add this to your shell profile for auto-activation:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+alias venv='source .venv/bin/activate'
+
+# Now just type: venv
+```
+
+#### Install Dependencies
+
+uv offers multiple ways to install dependencies:
+
+```bash
+# Method 1: Using pyproject.toml (recommended)
+uv sync
+
+# This installs:
+# - All production dependencies
+# - All dev dependencies (pytest, etc.)
+# - In editable mode
+
+# Method 2: Production only
 uv sync --no-dev
+
+# Method 3: Using requirements.txt
+uv pip install -r requirements.txt
+
+# Method 4: Install individual packages
+uv pip install fastapi uvicorn confluent-kafka redis
 ```
 
-**Option C: Install individual packages**
+**What `uv sync` does:**
+1. Reads `pyproject.toml`
+2. Resolves dependencies
+3. Installs everything in `.venv`
+4. Creates/updates `uv.lock` file
+
+#### Verify Installation
+
 ```bash
-# Install core packages
-uv add fastapi uvicorn confluent-kafka redis pyyaml
-
-# Install AI packages
-uv add google-genai elevenlabs
-
-# Install testing packages
-uv add --dev pytest pytest-cov pytest-asyncio
-```
-
-Verify installation:
-```bash
+# List installed packages
 uv pip list
+
+# Should see packages like:
+# fastapi, uvicorn, confluent-kafka, redis, etc.
+
+# Check specific packages
+uv pip show fastapi
+uv pip show confluent-kafka
+
+# Run a quick test
+uv run python -c "import fastapi; print(fastapi.__version__)"
 ```
 
-### 5. Setup Environment Variables
+### Step 3: Docker Infrastructure
+
+#### Start Services
 
 ```bash
-# Copy example environment file
+# Start all services in background
+docker-compose up -d
+
+# Services started:
+# - Redis (port 6379)
+# - Kafka (port 9093)
+# - Zookeeper (port 2181)
+# - Kafka UI (port 8080)
+
+# View logs
+docker-compose logs -f
+
+# View specific service logs
+docker-compose logs -f kafka
+docker-compose logs -f redis
+```
+
+#### Verify Services
+
+```bash
+# Check all services are running
+docker-compose ps
+
+# Expected output:
+# NAME              IMAGE                   STATUS
+# news_redis        redis:7-alpine         Up
+# news_kafka        cp-kafka:7.5.0         Up
+# news_zookeeper    cp-zookeeper:7.5.0     Up
+# news_kafka_ui     kafka-ui:latest        Up
+
+# Test Redis
+docker exec -it news_redis redis-cli ping
+# Expected: PONG
+
+# Wait for Kafka to be ready (~30 seconds)
+docker-compose logs kafka | grep "started"
+# Should see: [KafkaServer id=1] started
+
+# Open Kafka UI (optional)
+open http://localhost:8080  # macOS
+# or visit: http://localhost:8080 in browser
+```
+
+#### Troubleshooting Docker
+
+```bash
+# If services fail to start:
+
+# 1. Check Docker is running
+docker info
+
+# 2. Check port conflicts
+lsof -i :6379  # Redis
+lsof -i :9093  # Kafka
+lsof -i :8080  # Kafka UI
+
+# 3. Restart services
+docker-compose restart
+
+# 4. Reset everything (nuclear option)
+docker-compose down -v
+docker-compose up -d
+```
+
+### Step 4: Environment Configuration
+
+#### Create `.env` File
+
+```bash
+# Copy example file
 cp .env.example .env
 
-# Edit with your favorite editor
-nano .env
-# or
-vim .env
-# or
-code .env  # VS Code
+# Open in editor
+nano .env        # Terminal editor
+vim .env         # Vim
+code .env        # VS Code
+subl .env        # Sublime Text
 ```
 
-**Required Configuration:**
+#### Configure API Keys
+
+Edit `.env` and add your keys:
 
 ```env
 # ============================================
-# API Keys (REQUIRED for production)
+# API KEYS (REQUIRED)
 # ============================================
-GEMINI_API_KEY=your_gemini_api_key_here
-ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+GEMINI_API_KEY=your_actual_gemini_api_key_here
+ELEVENLABS_API_KEY=your_actual_elevenlabs_api_key_here
 
 # ============================================
-# Service Providers
+# SERVICE PROVIDERS
 # ============================================
-# For development, use 'mock'
+# For development, you can use 'mock' to avoid using API credits
 # For production, use 'gemini' and 'elevenlabs'
 TRANSLATION_PROVIDER=gemini
 TTS_PROVIDER=elevenlabs
 
 # ============================================
-# Kafka Configuration
+# INFRASTRUCTURE (defaults work for local)
 # ============================================
-# Local development (default)
 KAFKA_BOOTSTRAP_SERVERS=localhost:9093
-
-# Production (Confluent Cloud example)
-# KAFKA_BOOTSTRAP_SERVERS=pkc-xxx.us-east-1.aws.confluent.cloud:9092
-# KAFKA_CREDENTIALS=API_KEY:API_SECRET
-
-# ============================================
-# Redis Configuration
-# ============================================
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_TTL_HOURS=24
 
-# Production (managed Redis)
-# REDIS_PASSWORD=your_redis_password
-# REDIS_SSL=true
-
 # ============================================
-# Application Settings
+# APPLICATION
 # ============================================
 ENVIRONMENT=development
 LOG_LEVEL=INFO
@@ -162,311 +389,432 @@ FETCH_INTERVAL_MINUTES=15
 ENABLE_DEDUPLICATION=true
 
 # ============================================
-# Frontend Configuration
+# BACKEND API
+# ============================================
+PORT=8000
+ALLOWED_ORIGINS=http://localhost:3000
+
+# ============================================
+# FRONTEND
 # ============================================
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-### 6. Create Required Directories
+#### Verify Environment Variables
+
+```bash
+# Test that environment is loaded
+uv run python -c "
+import os
+from dotenv import load_dotenv
+load_dotenv()
+print(f'Gemini Key: {os.getenv(\"GEMINI_API_KEY\", \"NOT SET\")[:10]}...')
+print(f'ElevenLabs Key: {os.getenv(\"ELEVENLABS_API_KEY\", \"NOT SET\")[:10]}...')
+print(f'Translation Provider: {os.getenv(\"TRANSLATION_PROVIDER\")}')
+print(f'TTS Provider: {os.getenv(\"TTS_PROVIDER\")}')
+"
+
+# Should show:
+# Gemini Key: AIzaSyXXXX...
+# ElevenLabs Key: sk_XXXXXX...
+# Translation Provider: gemini
+# TTS Provider: elevenlabs
+```
+
+### Step 5: Initialize System
+
+#### Create Required Directories
 
 ```bash
 # Create directories for logs and audio
 mkdir -p logs
 mkdir -p audio_output
 mkdir -p test_audio_output
+
+# Verify
+ls -la
+# Should see: logs/, audio_output/, test_audio_output/
 ```
 
-### 7. Start Docker Services
+#### Seed Language Configuration
 
 ```bash
-# Start Redis, Kafka, Zookeeper
-docker-compose up -d
-
-# Verify services are running
-docker-compose ps
+# Initialize language configuration in Redis
+uv run python scripts/seed_languages.py
 
 # Expected output:
-# NAME              IMAGE                          STATUS
-# news_redis        redis:7-alpine                 Up
-# news_kafka        confluentinc/cp-kafka:7.5.0    Up
-# news_zookeeper    confluentinc/cp-zookeeper:7.5.0 Up
-# news_kafka_ui     provectuslabs/kafka-ui:latest  Up
+# ✓ Language configuration seeded to Redis
+
+# Verify in Redis
+docker exec -it news_redis redis-cli GET config:languages
 ```
 
-**Verify Docker Services:**
+This creates the default configuration:
+- **English** (en): George voice
+- **Hindi** (hi): Fin voice  
+- **Bengali** (bn): Fin voice
+
+#### Test API Integration
 
 ```bash
-# Test Redis
-docker exec -it news_redis redis-cli ping
-# Should return: PONG
+# Test Gemini translation
+uv run python test_translation.py
 
-# Test Kafka (wait ~30 seconds for startup)
-docker-compose logs kafka | grep "started"
-# Should show: [KafkaServer id=1] started
+# Expected output:
+# ✓ Found API Key: AIza...
+# Initializing Gemini Service...
+# Processing Article (English -> Hindi)...
+# ✅ SUCCESS!
+# ---
+# English Summary: ...
+# Hindi Translation: ...
 
-# Open Kafka UI (optional)
-open http://localhost:8080  # macOS
-# or
-xdg-open http://localhost:8080  # Linux
+# Test ElevenLabs TTS
+uv run python test_voice.py
+
+# Expected output:
+# ✓ Found API Key: sk_...
+# Initializing ElevenLabs Service...
+# Generating EN audio...
+# ✅ Success! Saved to: test_audio_output/test_voice_en.mp3
+#    File size: 45.32 KB
 ```
 
-### 8. Setup Frontend
+### Step 6: Frontend Setup
 
 ```bash
 # Navigate to frontend directory
 cd frontend
 
-# Install Node.js dependencies
+# Install dependencies
 npm install
 
-# Create environment file
+# This installs:
+# - Next.js 15
+# - React 19
+# - Tailwind CSS v4
+# - All required packages
+
+# Configure API URL
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+
+# Verify
+cat .env.local
 
 # Return to root directory
 cd ..
 ```
 
-## ✅ Verify Setup
+---
 
-### 1. Test Python Installation
-
-```bash
-# Check Python version
-python --version
-# Should be 3.13+
-
-# Check installed packages
-uv pip list | grep -E "fastapi|confluent-kafka|redis|genai|elevenlabs"
-```
-
-### 2. Test Docker Services
-
-```bash
-# Test Redis connection
-python -c "
-import redis
-r = redis.Redis(host='localhost', port=6379)
-print(f'Redis: {r.ping()}')
-"
-# Should print: Redis: True
-
-# Test Kafka connection
-python -c "
-from confluent_kafka.admin import AdminClient
-admin = AdminClient({'bootstrap.servers': 'localhost:9093'})
-topics = admin.list_topics(timeout=5)
-print(f'Kafka: Connected ({len(topics.topics)} topics)')
-"
-# Should print: Kafka: Connected (X topics)
-```
-
-### 3. Test API Keys
-
-**Test Gemini:**
-```bash
-uv run python test_translation.py
-```
-
-Expected output:
-```
-✓ Found API Key: AIza...
-Initializing Gemini Service...
-Processing Article (English -> Hindi)...
-
-✅ SUCCESS!
-----------------------------------------
-📄 English Summary:
-SpaceX successfully launched Starship...
-----------------------------------------
-🕉️ Hindi Translation:
-स्पेसएक्स ने सफलतापूर्वक...
-----------------------------------------
-```
-
-**Test ElevenLabs:**
-```bash
-uv run python test_voice.py
-```
-
-Expected output:
-```
-✓ Found API Key: sk_...
-Initializing ElevenLabs Service...
-
-Generating EN audio...
-✅ Success! Saved to: test_audio_output/test_voice_en.mp3
-   File size: 45.32 KB
-
-Generating HI audio...
-✅ Success! Saved to: test_audio_output/test_voice_hi.mp3
-   File size: 52.18 KB
-```
-
-### 4. Run Unit Tests
-
-```bash
-# Run fast unit tests (no Docker required)
-./run_tests.sh unit
-
-# Or with uv directly
-uv run pytest -m unit -v
-```
-
-Expected output:
-```
-======================== test session starts =========================
-tests/test_models.py::TestNewsItem::test_create_news_item PASSED
-tests/test_models.py::TestNewsItem::test_news_item_id_generation PASSED
-...
-====================== 15 passed in 2.34s =======================
-```
-
-### 5. Run Integration Tests
-
-```bash
-# Run integration tests (requires Docker)
-./run_tests.sh integration
-
-# Or with uv
-uv run pytest -m integration -v
-```
-
-## 🎯 Running the Application
+## 🚀 Running the Application
 
 ### Development Mode (Mock Services)
 
-Good for testing without API credits:
+Great for testing without using API credits:
 
 ```bash
 # Edit .env
 TRANSLATION_PROVIDER=mock
 TTS_PROVIDER=mock
 
-# Terminal 1: Pipeline (fetches news)
+# Terminal 1: Fetch news (once)
 uv run python news_pipeline.py --mode once
 
-# Terminal 2: Processing (mock translation/TTS)
-uv run python processing_consumer.py --mode batch --max 5
+# Terminal 2: Process (mock translation/TTS)
+uv run python processing_consumer.py --mode batch --max 10
 
-# Terminal 3: API Server
+# Terminal 3: API server
 uv run python main.py
 
 # Terminal 4: Frontend
 cd frontend && npm run dev
 ```
 
-### Production Mode (Real Services)
+### Production Mode (Real APIs)
 
-Uses real Gemini and ElevenLabs APIs:
+Uses actual Gemini and ElevenLabs:
 
 ```bash
 # Edit .env
 TRANSLATION_PROVIDER=gemini
 TTS_PROVIDER=elevenlabs
 
-# Terminal 1: Pipeline (runs continuously)
+# Terminal 1: Fetch news continuously (every 15 min)
 uv run python news_pipeline.py --mode continuous --interval 15
 
-# Terminal 2: Processing (continuous)
+# Terminal 2: Process continuously
 uv run python processing_consumer.py --mode continuous
 
-# Terminal 3: API Server
+# Terminal 3: API server
 uv run python main.py
 
 # Terminal 4: Frontend
 cd frontend && npm run dev
 ```
 
-### Access Points
+### Command Options
 
-- **Frontend**: http://localhost:3000
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Kafka UI**: http://localhost:8080
-- **Redis**: localhost:6379
-
-## 🔧 Development Workflow with uv
-
-### Adding New Packages
+#### News Pipeline
 
 ```bash
-# Add a production dependency
-uv add package-name
+# Run once (good for testing)
+uv run python news_pipeline.py --mode once
 
-# Add a development dependency
-uv add --dev package-name
+# Run continuously (production)
+uv run python news_pipeline.py --mode continuous --interval 15
+
+# With custom Kafka
+uv run python news_pipeline.py --kafka localhost:9093
+
+# Disable deduplication
+uv run python news_pipeline.py --no-dedup
+
+# Get help
+uv run python news_pipeline.py --help
+```
+
+#### Processing Consumer
+
+```bash
+# Process 5 messages then exit
+uv run python processing_consumer.py --mode batch --max 5
+
+# Process continuously
+uv run python processing_consumer.py --mode continuous
+
+# With custom providers
+uv run python processing_consumer.py \
+  --translation-provider gemini \
+  --tts-provider elevenlabs
+
+# With custom Kafka
+uv run python processing_consumer.py --kafka localhost:9093
+
+# Get help
+uv run python processing_consumer.py --help
+```
+
+#### API Server
+
+```bash
+# Default (port 8000)
+uv run python main.py
+
+# Custom port
+PORT=9000 uv run python main.py
+
+# With auto-reload (development)
+uv run uvicorn main:app --reload --port 8000
+
+# Production mode
+ENVIRONMENT=production uv run python main.py
+```
+
+### Access Points
+
+Once running:
+
+- 🎨 **Frontend**: http://localhost:3000
+- 🔌 **API**: http://localhost:8000
+- 📚 **API Docs** (Swagger): http://localhost:8000/docs
+- 📖 **API Docs** (ReDoc): http://localhost:8000/redoc
+- 📊 **Kafka UI**: http://localhost:8080
+
+---
+
+## 💻 Development Workflow
+
+### Working with uv
+
+#### Adding New Packages
+
+```bash
+# Add production dependency
+uv add fastapi
 
 # Add with version constraint
-uv add "package-name>=1.0.0,<2.0.0"
+uv add "fastapi>=0.100.0"
 
-# Add from specific source
+# Add dev dependency
+uv add --dev pytest
+
+# Add multiple packages
+uv add requests beautifulsoup4 lxml
+
+# Add from specific index
 uv add --index-url https://pypi.org/simple package-name
 ```
 
-### Updating Dependencies
+#### Removing Packages
 
 ```bash
-# Show outdated packages
+# Remove package
+uv remove package-name
+
+# Remove dev dependency
+uv remove --dev pytest-mock
+```
+
+#### Updating Dependencies
+
+```bash
+# Update specific package
+uv pip install --upgrade package-name
+
+# Update all packages (regenerate lock)
+uv sync --upgrade
+
+# Check for outdated packages
 uv pip list --outdated
 
-# Update a specific package
-uv pip install -U package-name
+# Show what would be updated
+uv pip list --outdated --format json
+```
 
-# Update all packages (be careful!)
-uv pip install -U -r requirements.txt
+#### Lock File Management
 
-# Regenerate requirements.txt
-uv pip compile pyproject.toml -o requirements.txt
+```bash
+# Generate/update lock file
+uv lock
+
+# Install from lock file (reproducible)
+uv sync --frozen
+
+# Verify lock file is up to date
+uv lock --check
 ```
 
 ### Running Scripts with uv
 
 ```bash
 # Run any Python script
-uv run python script_name.py
+uv run python script.py
 
 # Run with arguments
 uv run python news_pipeline.py --mode once
 
-# Run tests
-uv run pytest
+# Run module
+uv run python -m pytest
 
 # Run with specific Python version
 uv run --python 3.13 python script.py
+
+# Run without activation
+# (uv handles virtual environment automatically)
+uv run pytest tests/
 ```
 
-### Virtual Environment Management
+### Testing
 
 ```bash
-# Create new virtual environment
-uv venv
+# Run all tests
+uv run pytest
 
-# Create with specific Python version
-uv venv --python 3.13
+# Run with coverage
+uv run pytest --cov=services --cov=models
 
-# Remove virtual environment
-rm -rf .venv
+# Run specific test file
+uv run pytest tests/test_models.py
 
-# Recreate fresh environment
-rm -rf .venv && uv venv && uv sync
+# Run specific test
+uv run pytest tests/test_models.py::TestNewsItem::test_create_news_item
+
+# Run with verbose output
+uv run pytest -v
+
+# Run fast tests only
+uv run pytest -m unit
+
+# Using test script
+chmod +x run_tests.sh
+./run_tests.sh unit
+./run_tests.sh integration
+./run_tests.sh coverage
 ```
 
-## 🐛 Troubleshooting
-
-### uv Installation Issues
+### Code Quality
 
 ```bash
-# Check if uv is in PATH
+# Format code
+uv run black .
+uv run isort .
+
+# Lint code
+uv run flake8
+uv run pylint services/
+
+# Type checking (if mypy is installed)
+uv run mypy services/
+
+# Run all checks
+uv run black . && uv run isort . && uv run flake8
+```
+
+### Git Workflow
+
+```bash
+# Create feature branch
+git checkout -b feature/add-new-language
+
+# Make changes...
+
+# Run tests before commit
+./run_tests.sh unit
+
+# Format code
+uv run black . && uv run isort .
+
+# Commit
+git add .
+git commit -m "feat: add Spanish language support"
+
+# Push
+git push origin feature/add-new-language
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### uv Issues
+
+#### Installation Problems
+
+```bash
+# Verify uv is in PATH
 which uv
+echo $PATH
 
 # Add to PATH manually (Linux/macOS)
 export PATH="$HOME/.cargo/bin:$PATH"
+# Add to ~/.bashrc or ~/.zshrc permanently
 
 # Reinstall uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Update uv
+uv self update
 ```
 
-### Package Installation Failures
+#### Virtual Environment Issues
+
+```bash
+# Remove and recreate virtual environment
+rm -rf .venv
+uv venv
+
+# Activate
+source .venv/bin/activate  # or .venv\Scripts\activate
+
+# Verify
+which python  # Should point to .venv
+
+# Reinstall dependencies
+uv sync
+```
+
+#### Package Installation Failures
 
 ```bash
 # Clear uv cache
@@ -475,193 +823,215 @@ uv cache clean
 # Try installing with verbose output
 uv pip install -v package-name
 
-# Use different index
-uv pip install --index-url https://pypi.org/simple package-name
+# Install with no cache
+uv pip install --no-cache package-name
+
+# Check for conflicts
+uv pip check
+
+# Reinstall all dependencies
+rm -rf .venv
+uv venv
+uv sync --reinstall
 ```
 
-### Docker Service Issues
+### Docker Issues
 
 ```bash
-# Check if Docker is running
-docker info
+# Docker not running
+sudo systemctl start docker  # Linux
+# Or start Docker Desktop (macOS/Windows)
 
-# Restart Docker services
-docker-compose restart
+# Ports already in use
+lsof -i :6379  # Check Redis
+lsof -i :9093  # Check Kafka
+kill -9 <PID>  # Kill conflicting process
 
-# View logs
-docker-compose logs kafka
-docker-compose logs redis
-
-# Reset everything
-docker-compose down -v
+# Services not starting
+docker-compose down -v  # Remove volumes
 docker-compose up -d
-```
 
-### Port Conflicts
+# View detailed logs
+docker-compose logs --tail=100 -f kafka
 
-```bash
-# Check what's using a port
-lsof -i :6379  # Redis
-lsof -i :9093  # Kafka
-lsof -i :8000  # API
-lsof -i :3000  # Frontend
-
-# Kill process
-kill -9 <PID>
-
-# Or change ports in docker-compose.yml
-```
-
-### API Key Issues
-
-```bash
-# Verify environment variables are loaded
-python -c "
-import os
-from dotenv import load_dotenv
-load_dotenv()
-print('Gemini:', os.getenv('GEMINI_API_KEY')[:10] + '...')
-print('ElevenLabs:', os.getenv('ELEVENLABS_API_KEY')[:10] + '...')
-"
-
-# Test APIs directly
-uv run python test_translation.py
-uv run python test_voice.py
-```
-
-### Python Version Issues
-
-```bash
-# Check Python version
-python --version
-
-# Use specific Python version with uv
-uv venv --python 3.13
-
-# Or use system Python
-uv venv --python $(which python3.13)
-```
-
-## 📊 Monitoring & Logs
-
-### View Application Logs
-
-```bash
-# Watch all logs
-tail -f logs/*.log
-
-# Watch specific service
-tail -f logs/pipeline.log
-tail -f logs/kafka_producer.log
-tail -f logs/translation.log
-
-# Search for errors
-grep ERROR logs/*.log
-```
-
-### Monitor Docker Services
-
-```bash
-# View container status
+# Container keeps restarting
 docker-compose ps
+docker-compose logs <service-name>
 
-# View resource usage
-docker stats
-
-# View logs
-docker-compose logs -f kafka
-docker-compose logs -f redis
+# Out of disk space
+docker system prune -a  # Clean up
 ```
 
-### Monitor Kafka
-
-Open http://localhost:8080 for:
-- Topic messages and throughput
-- Consumer groups and lag
-- Broker health
-
-### Monitor Redis
+### API Connection Issues
 
 ```bash
-# Connect to Redis CLI
-docker exec -it news_redis redis-cli
+# Test Gemini API
+curl -H "Content-Type: application/json" \
+  -d '{"contents":[{"parts":[{"text":"Hello"}]}]}' \
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_KEY"
 
-# Get stats
-INFO
+# Test ElevenLabs API
+curl -H "xi-api-key: YOUR_KEY" \
+  "https://api.elevenlabs.io/v1/voices"
 
-# Count cached articles
-DBSIZE
-
-# View sample keys
-KEYS news:seen:* | head -20
+# If 401 Unauthorized:
+# - Check API key is correct
+# - Verify key is active in dashboard
+# - Check for trailing spaces in .env
 ```
 
-## 🧹 Cleanup
-
-### Reset Development Environment
+### Import Errors
 
 ```bash
-# Stop and remove Docker containers
-docker-compose down -v
+# Module not found
+uv pip list | grep module-name  # Check if installed
+uv pip install module-name
+
+# Wrong Python version
+python --version  # Should be 3.13.x
+which python  # Should be in .venv
+
+# Reinstall from scratch
+rm -rf .venv
+uv venv
+uv sync
 
 # Clear Python cache
 find . -type d -name "__pycache__" -exec rm -r {} +
 find . -type f -name "*.pyc" -delete
+```
+
+### Redis Connection Errors
+
+```bash
+# Check Redis is running
+docker ps | grep redis
+
+# Test connection
+docker exec -it news_redis redis-cli ping
+# Should return: PONG
+
+# Check Redis logs
+docker-compose logs redis
+
+# Restart Redis
+docker-compose restart redis
+
+# Connect manually
+docker exec -it news_redis redis-cli
+# Then: PING, GET config:languages, etc.
+```
+
+### Kafka Issues
+
+```bash
+# Kafka not ready (wait 30 seconds)
+docker-compose logs kafka | grep "started"
+
+# Check Kafka UI
+open http://localhost:8080
+
+# List topics
+docker exec -it news_kafka kafka-topics \
+  --bootstrap-server localhost:9092 --list
+
+# Describe topic
+docker exec -it news_kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --describe --topic raw-news-feed
+
+# Reset Kafka
+docker-compose down -v
+docker-compose up -d
+# Wait 30 seconds for startup
+```
+
+---
+
+## 🧹 Cleanup
+
+### Quick Cleanup
+
+```bash
+# Stop services
+docker-compose down
+
+# Deactivate virtual environment
+deactivate
 
 # Clear logs
 rm -rf logs/*
 
 # Clear audio files
 rm -rf audio_output/*
-rm -rf test_audio_output/*
-
-# Clear test artifacts
-rm -rf .coverage htmlcov/ .pytest_cache/
-
-# Recreate virtual environment
-rm -rf .venv
-uv venv
-uv sync
 ```
 
-### Complete Reset
+### Full Reset
 
 ```bash
-# Run cleanup script
-./cleanup.sh
-
-# Or manually:
+# Stop and remove Docker containers
 docker-compose down -v
+
+# Remove Docker images (optional)
 docker system prune -a
-rm -rf .venv logs/* audio_output/* test_audio_output/*
-uv venv && uv sync
+
+# Remove virtual environment
+rm -rf .venv
+
+# Remove generated files
+rm -rf logs/* audio_output/* test_audio_output/*
+rm -rf .pytest_cache/ htmlcov/ .coverage
+rm -rf **/__pycache__ **/*.pyc
+
+# Recreate environment
+uv venv
+source .venv/bin/activate
+uv sync
+
+# Restart Docker
+docker-compose up -d
 ```
-
-## 🚀 Next Steps
-
-1. ✅ Complete setup and verify all tests pass
-2. 📝 Review configuration in `config/sources.yaml`
-3. 🔑 Add your API keys to `.env`
-4. 🧪 Test with mock services first
-5. 🎯 Run with real services
-6. 🎨 Customize frontend in `frontend/`
-7. 📦 Prepare for deployment
-
-## 📚 Additional Resources
-
-- [uv Documentation](https://docs.astral.sh/uv/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Kafka Documentation](https://kafka.apache.org/documentation/)
-- [Next.js Documentation](https://nextjs.org/docs)
-
-## 🆘 Getting Help
-
-1. Check logs: `tail -f logs/*.log`
-2. Run health check: `curl http://localhost:8000/health`
-3. Check Docker: `docker-compose ps`
-4. Run tests: `./run_tests.sh unit`
-5. Review [TESTING.md](TESTING.md)
 
 ---
 
-**Setup complete! 🎉 Now run the application and start broadcasting multilingual news!**
+## 📚 Next Steps
+
+After successful setup:
+
+1. ✅ **Run Tests**: `./run_tests.sh unit`
+2. 📝 **Read Documentation**: Check `docs/` folder
+3. 🎨 **Customize**: Edit `config/sources.yaml` for RSS feeds
+4. 🌐 **Add Languages**: Run `scripts/add_language.py`
+5. 🚀 **Deploy**: Follow `docs/DEPLOYMENT.md`
+
+---
+
+## 🆘 Getting Help
+
+1. **Check Documentation**
+   - README.md for overview
+   - TESTING.md for testing guide
+   - DEPLOYMENT.md for production
+
+2. **Search Issues**
+   - GitHub Issues
+   - Stack Overflow
+
+3. **Enable Debug Logging**
+   ```bash
+   LOG_LEVEL=DEBUG uv run python main.py
+   ```
+
+4. **Check Logs**
+   ```bash
+   tail -f logs/*.log
+   ```
+
+---
+
+**Setup complete! 🎉 Now start building amazing features!**
+
+*If you encounter any issues, please open a GitHub issue with:*
+- *Your OS and Python version*
+- *Error messages*
+- *Steps to reproduce*
