@@ -79,7 +79,7 @@ def replay_messages(
                             news_item = NewsItem(**news_payload)
 
                         if not dry_run:
-                            producer.produce_news_item(target_topic, news_item)
+                            producer.produce_news_item(news_item, topic=target_topic)
                             logger.info(f"-> Replayed item {news_item.id} to {target_topic}")
                         else:
                             logger.info(f"-> [DRY RUN] Would replay item {news_item.id}")

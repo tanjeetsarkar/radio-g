@@ -285,6 +285,8 @@ class NewsProcessingConsumer:
             "messages_failed": self.stats["messages_failed"],
             "dlq_events": self.stats["dlq_events_sent"],
             "by_language": self.stats["by_language"],
+            "translation_service": self.translation_service.get_stats(),
+            "tts_service": self.tts_service.get_stats(),
         }
 
     def shutdown(self):

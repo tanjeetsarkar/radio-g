@@ -83,10 +83,9 @@ class NewsKafkaProducer:
         except Exception as e:
             logger.error(f"Error managing topics: {e}")
 
-    def produce_news_item(self, topic: str, news_item: NewsItem):
+    def produce_news_item(self, news_item: NewsItem, topic: str = "raw-news-feed"):
         """Produce a single news item to a topic"""
         try:
-            # Serialize
             key = news_item.id
             value = news_item.to_json()
 
@@ -104,6 +103,24 @@ class NewsKafkaProducer:
         except Exception as e:
             logger.error(f"Failed to produce message: {e}")
             return False
+
+    def produce_batch(self, news_items: List[NewsItem], topic: str = "raw-news-feed") -> Dict[str, Any]:
+        """Produce a batch of news items and return delivery stats"""
+        stats = {"total": len(news_items), "delivered": 0, "failed": 0}
+
+        for item in news_items:
+            success = self.produce_news_item(item, topic=topic)
+            if success:
+                stats["delivered"] += 1
+            else:
+                stats["failed"] += 1
+
+        # Calculate success rate and flush pending messages
+        stats["success_rate"] = (
+            (stats["delivered"] / stats["total"]) * 100 if stats["total"] else 0
+        )
+        self.producer.flush()
+        return stats
 
     def produce_dlq_event(self, topic: str, event: Any):
         """Produce a DLQ event (accepts DLQEvent object)"""
@@ -143,7 +160,7 @@ class NewsKafkaProducer:
             stats[category]["total"] += 1
 
             # Send to raw processing topic
-            success = self.produce_news_item("raw-news-feed", item)
+            success = self.produce_news_item(item, topic="raw-news-feed")
 
             if success:
                 stats[category]["delivered"] += 1
@@ -173,13 +190,16 @@ class NewsKafkaProducer:
             admin_client = AdminClient({"bootstrap.servers": self.bootstrap_servers})
             metadata = admin_client.list_topics(timeout=5)
             broker_count = len(metadata.brokers)
+            topic_names = list(metadata.topics.keys())
             return {
                 "connected": broker_count > 0,
-                "brokers": broker_count,
-                "topics": len(metadata.topics),
+                "status": "healthy" if broker_count > 0 else "unhealthy",
+                "broker_count": broker_count,
+                "topic_count": len(topic_names),
+                "topics": topic_names,
             }
         except Exception as e:
-            return {"connected": False, "error": str(e)}
+            return {"connected": False, "status": "unhealthy", "error": str(e)}
 
     def close(self):
         """Flush and close producer"""

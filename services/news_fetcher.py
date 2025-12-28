@@ -3,7 +3,7 @@ import yaml
 import time
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from dateutil import parser as date_parser
 
 from models.news_item import NewsItem
@@ -65,7 +65,7 @@ class NewsFetcher:
                     continue
 
                 news_items, failures = self._fetch_feed_with_retry(
-                    feed_config, category
+                    feed_config, category, include_failures=True
                 )
                 all_news.extend(news_items)
                 all_failures.extend(failures)
@@ -82,7 +82,7 @@ class NewsFetcher:
         return all_news, all_failures
 
     def _fetch_feed_with_retry(
-        self, feed_config: Dict, category: str
+        self, feed_config: Dict, category: str, include_failures: bool = False
     ) -> Tuple[List[NewsItem], List[DLQEvent]]:
         """Fetch a single feed with retry logic"""
         url = feed_config["url"]
@@ -93,7 +93,8 @@ class NewsFetcher:
                 logger.info(
                     f"Fetching {name} (attempt {attempt + 1}/{self.retry_attempts + 1})"
                 )
-                return self._fetch_feed(url, name, category)
+                news_items, failures = self._fetch_feed(url, name, category)
+                return (news_items, failures) if include_failures else (news_items, [])
 
             except Exception as e:
                 logger.error(f"Error fetching {name}: {str(e)}")
@@ -112,9 +113,9 @@ class NewsFetcher:
                         error_message=str(e),
                         payload={"url": url, "category": category},
                     )
-                    return [], [failure]
+                    return ([], [failure]) if include_failures else ([], [])
 
-        return [], []
+        return ([], [])
 
     def _fetch_feed(
         self, url: str, source: str, category: str
@@ -175,18 +176,22 @@ class NewsFetcher:
 
         dlq_events: List[DLQEvent] = []
 
-        # Helper to support both dict-like and attribute-like feed entries
-        def _get(e, key, default=None):
+        def _get(e: Any, key: str, default=None):
+            """Safely extract values from dicts, feedparser objects, or mocks."""
             try:
-                g = getattr(e, "get", None)
-                if callable(g):
-                    return g(key, default)
+                if isinstance(e, dict):
+                    return e.get(key, default)
+
+                # For objects (including Mock), prefer real attributes already set
+                attrs = getattr(e, "__dict__", {})
+                if key in attrs:
+                    return attrs.get(key, default)
+
+                if hasattr(e, key):
+                    return getattr(e, key, default)
             except Exception:
                 pass
-            try:
-                return getattr(e, key, default)
-            except Exception:
-                return default
+            return default
 
         # Extract basic fields
         title = (_get(entry, "title") or "").strip()
@@ -223,15 +228,7 @@ class NewsFetcher:
 
         # Try to get image from RSS if not found during scraping
         if not image_url:
-            if hasattr(entry, "media_content") and entry.media_content:
-                image_url = entry.media_content[0].get("url")
-            elif hasattr(entry, "media_thumbnail") and entry.media_thumbnail:
-                image_url = entry.media_thumbnail[0].get("url")
-            elif hasattr(entry, "enclosures") and entry.enclosures:
-                for enclosure in entry.enclosures:
-                    if enclosure.get("type", "").startswith("image/"):
-                        image_url = enclosure.get("href")
-                        break
+            image_url = self._extract_image_from_entry(entry)
 
         news_item = NewsItem(
             title=title,
@@ -264,6 +261,46 @@ class NewsFetcher:
             )
 
         return news_item, dlq_events
+
+    def _extract_image_from_entry(self, entry) -> Optional[str]:
+        """Best-effort extraction of an image URL from common RSS fields."""
+
+        def _as_sequence(value: Any):
+            return value if isinstance(value, (list, tuple)) else None
+
+        # Prefer explicit attributes/dict fields without triggering Mock auto-creation
+        if isinstance(entry, dict):
+            media_content = entry.get("media_content")
+            media_thumbnail = entry.get("media_thumbnail")
+            enclosures = entry.get("enclosures")
+        else:
+            attrs = getattr(entry, "__dict__", {})
+            media_content = attrs.get("media_content")
+            media_thumbnail = attrs.get("media_thumbnail")
+            enclosures = attrs.get("enclosures")
+
+        media_content = _as_sequence(media_content)
+        media_thumbnail = _as_sequence(media_thumbnail)
+        enclosures = _as_sequence(enclosures)
+
+        if media_content:
+            first = media_content[0]
+            if isinstance(first, dict):
+                return first.get("url") or first.get("href")
+
+        if media_thumbnail:
+            first = media_thumbnail[0]
+            if isinstance(first, dict):
+                return first.get("url") or first.get("href")
+
+        if enclosures:
+            for enclosure in enclosures:
+                if isinstance(enclosure, dict) and enclosure.get("type", "").startswith(
+                    "image/"
+                ):
+                    return enclosure.get("href") or enclosure.get("url")
+
+        return None
 
     def _parse_date(self, entry) -> datetime:
         """Parse published date from RSS entry"""

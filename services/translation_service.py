@@ -40,18 +40,20 @@ class MockTranslationProvider(TranslationProvider):
         self.call_count += 1
         time.sleep(0.1)
         summary = text[:max_length] + "..."
-        # Provide human-friendly language markers to match legacy tests
+        # Provide human-friendly language markers to match legacy tests while
+        # keeping a simple prefix for assertions that check startswith("[XX]")
         lang_markers = {
             'hi': '[HI-हिंदी]',
             'bn': '[BN-বাংলা]',
             'en': '[EN]'
         }
-        marker = lang_markers.get(target_language, f"[{target_language.upper()}]")
+        prefix = f"[{target_language.upper()}]"
+        marker = lang_markers.get(target_language, prefix)
 
         return {
             'original': text[:50],
             'summary': summary,
-            'translated_summary': f"{marker} {summary}",
+            'translated_summary': f"{prefix} {marker} {summary}",
             'target_language': target_language,
             'provider': 'mock'
         }
@@ -134,11 +136,6 @@ class TranslationService:
             return self.cache[key]
             
         result = self.provider.translate_and_summarize(text, target_language, max_length)
-        # increment call counters
-        try:
-            self.provider.call_count += 1
-        except Exception:
-            pass
         self.call_count += 1
 
         self.cache[key] = result

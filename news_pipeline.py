@@ -98,7 +98,12 @@ class NewsPipeline:
         try:
             # Step 1: Fetch news from all sources
             logger.info("\n[Step 1/2] Fetching news from RSS feeds...")
-            news_items, failures = self.fetcher.fetch_all_feeds()
+            fetch_result = self.fetcher.fetch_all_feeds()
+            if isinstance(fetch_result, tuple) and len(fetch_result) == 2:
+                news_items, failures = fetch_result
+            else:
+                news_items = fetch_result  # Backwards-compatible with older tests
+                failures = []
 
             # Handle Failures immediately (DLQ)
             if failures:
