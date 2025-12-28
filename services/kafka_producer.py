@@ -80,7 +80,7 @@ class NewsKafkaProducer:
             for topic in topics:
                 if topic not in existing_topics:
                     new_topics.append(
-                        NewTopic(topic, num_partitions=3, replication_factor=1)
+                        NewTopic(topic, num_partitions=3, replication_factor=3)
                     )
 
             if new_topics:
