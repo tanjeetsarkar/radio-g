@@ -139,7 +139,7 @@ Get API keys:
 
 ```bash
 git clone <repository-url>
-cd multilingual-news-radio
+cd radio-g
 ```
 
 ### 2️⃣ Backend Setup
@@ -758,7 +758,7 @@ uv sync
 ## 🗺️ Project Structure
 
 ```
-multilingual-news-radio/
+radio-g/
 ├── config/
 │   ├── config.py              # Environment-based configuration
 │   ├── logging_config.py      # Structured logging setup
