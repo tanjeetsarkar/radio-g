@@ -1,328 +1,186 @@
-from confluent_kafka import Producer, KafkaException
-from confluent_kafka.admin import AdminClient, NewTopic
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Any, Optional
+from confluent_kafka import Producer
+from confluent_kafka.admin import AdminClient, NewTopic
 from models.news_item import NewsItem
-import socket
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class NewsKafkaProducer:
     """
-    Produces news items to Kafka topics
-    Handles topic creation and message delivery
+    Producer service for publishing news items to Kafka topics.
+    Handles serialization and delivery callbacks.
     """
-    
-    def __init__(
-        self,
-        bootstrap_servers: str = "localhost:9093",
-        client_id: str = "news-producer"
-    ):
-        """
-        Initialize Kafka producer
-        
-        Args:
-            bootstrap_servers: Kafka broker addresses
-            client_id: Client identifier
-        """
+
+    def __init__(self, bootstrap_servers: str = "localhost:9093"):
         self.bootstrap_servers = bootstrap_servers
-        self.client_id = client_id
-        
-        # Producer configuration
-        self.config = {
-            'bootstrap.servers': bootstrap_servers,
-            'client.id': f"{client_id}-{socket.gethostname()}",
-            'acks': 'all',  # Wait for all replicas to acknowledge
-            'retries': 3,
-            'retry.backoff.ms': 1000,
-            'compression.type': 'gzip',  # Compress messages
-            'linger.ms': 100,  # Batch messages for efficiency
-            'batch.size': 32768,  # 32KB batch size
+        self.producer_config = {
+            "bootstrap.servers": bootstrap_servers,
+            "client.id": "news-producer",
+            "linger.ms": 100,  # Small delay to allow batching
+            "compression.type": "gzip",
+            "retries": 3,
         }
-        
-        # Initialize producer
+
         try:
-            self.producer = Producer(self.config)
-            logger.info(f"✓ Kafka Producer initialized: {bootstrap_servers}")
-        except KafkaException as e:
+            self.producer = Producer(self.producer_config)
+            logger.info(f"Kafka Producer initialized (servers: {bootstrap_servers})")
+        except Exception as e:
             logger.error(f"Failed to initialize Kafka Producer: {e}")
             raise
-        
-        # Initialize admin client for topic management
-        self.admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
-        
-        # Topic names
-        self.topics = {
-            'raw': 'raw-news-feed',
-            'english': 'news-english',
-            'hindi': 'news-hindi',
-            'bengali': 'news-bengali'
-        }
-        
-        # Delivery statistics
-        self.stats = {
-            'delivered': 0,
-            'failed': 0
-        }
-    
-    def create_topics_if_not_exist(self, num_partitions: int = 3, replication_factor: int = 1):
-        """
-        Create Kafka topics if they don't exist
-        
-        Args:
-            num_partitions: Number of partitions per topic
-            replication_factor: Replication factor (1 for single broker)
-        """
-        existing_topics = self.admin_client.list_topics(timeout=10).topics
-        
-        topics_to_create = []
-        for topic_name in self.topics.values():
-            if topic_name not in existing_topics:
-                topics_to_create.append(
-                    NewTopic(
-                        topic=topic_name,
-                        num_partitions=num_partitions,
-                        replication_factor=replication_factor
-                    )
-                )
-        
-        if topics_to_create:
-            logger.info(f"Creating {len(topics_to_create)} topics...")
-            fs = self.admin_client.create_topics(topics_to_create)
-            
-            for topic, f in fs.items():
-                try:
-                    f.result()  # Wait for topic creation
-                    logger.info(f"✓ Created topic: {topic}")
-                except Exception as e:
-                    logger.error(f"Failed to create topic {topic}: {e}")
-        else:
-            logger.info("✓ All topics already exist")
-    
+
     def _delivery_callback(self, err, msg):
-        """
-        Callback for message delivery confirmation
-        """
+        """Callback called when message is delivered or fails"""
         if err:
             logger.error(f"Message delivery failed: {err}")
-            self.stats['failed'] += 1
         else:
-            logger.debug(
-                f"Message delivered to {msg.topic()} "
-                f"[partition {msg.partition()}] at offset {msg.offset()}"
-            )
-            self.stats['delivered'] += 1
-    
-    def produce_news_item(
-        self,
-        news_item: NewsItem,
-        topic: Optional[str] = None,
-        key: Optional[str] = None
-    ) -> bool:
-        """
-        Produce a single news item to Kafka
-        
-        Args:
-            news_item: NewsItem to send
-            topic: Topic name (defaults to 'raw-news-feed')
-            key: Message key for partitioning
-            
-        Returns:
-            True if successfully queued, False otherwise
-        """
-        if topic is None:
-            topic = self.topics['raw']
-        
+            # logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
+            pass
+
+    def create_topics_if_not_exist(self, topics: Optional[List[str]] = None):
+        """Create Kafka topics if they don't exist"""
+        if topics is None:
+            topics = [
+                "raw-news-feed",
+                "news-english",
+                "news-hindi",
+                "news-bengali",
+                "dlq-ingestion",  # NEW
+                "dlq-processing",  # NEW
+            ]
+
+        admin_client = AdminClient({"bootstrap.servers": self.bootstrap_servers})
+
         try:
-            # Serialize news item to JSON
-            message_value = news_item.to_json()
-            
-            # Use article ID as key for consistent partitioning
-            message_key = key or news_item.id
-            
-            # Produce message
+            # Check existing topics
+            cluster_metadata = admin_client.list_topics(timeout=10)
+            existing_topics = cluster_metadata.topics
+
+            new_topics = []
+            for topic in topics:
+                if topic not in existing_topics:
+                    # Create topic with default settings
+                    new_topics.append(
+                        NewTopic(topic, num_partitions=3, replication_factor=1)
+                    )
+
+            if new_topics:
+                fs = admin_client.create_topics(new_topics)
+
+                # Wait for each operation to finish
+                for topic, f in fs.items():
+                    try:
+                        f.result()  # The result itself is None
+                        logger.info(f"Topic '{topic}' created")
+                    except Exception as e:
+                        logger.error(f"Failed to create topic '{topic}': {e}")
+            else:
+                logger.info("All topics already exist")
+
+        except Exception as e:
+            logger.error(f"Error managing topics: {e}")
+
+    def produce_news_item(self, topic: str, news_item: NewsItem):
+        """Produce a single news item to a topic"""
+        try:
+            # Serialize
+            key = news_item.id
+            value = news_item.to_json()
+
             self.producer.produce(
                 topic=topic,
-                key=message_key.encode('utf-8'),
-                value=message_value.encode('utf-8'),
-                callback=self._delivery_callback
+                key=key.encode("utf-8"),
+                value=value.encode("utf-8"),
+                callback=self._delivery_callback,
             )
-            
-            # Trigger callbacks (non-blocking)
+
+            # Trigger poll to serve delivery callbacks
             self.producer.poll(0)
-            
             return True
-            
-        except BufferError:
-            logger.warning("Local queue full, waiting...")
-            self.producer.flush()
-            return self.produce_news_item(news_item, topic, key)
-            
+
         except Exception as e:
             logger.error(f"Failed to produce message: {e}")
-            self.stats['failed'] += 1
             return False
-    
-    def produce_batch(
-        self,
-        news_items: List[NewsItem],
-        topic: str = None
-    ) -> Dict[str, Any]:
-        """
-        Produce multiple news items in batch
-        
-        Args:
-            news_items: List of NewsItem objects
-            topic: Target topic (defaults to 'raw-news-feed')
-            
-        Returns:
-            Dictionary with success/failure counts
-        """
-        if topic is None:
-            topic = self.topics['raw']
-        
-        logger.info(f"Producing {len(news_items)} messages to topic '{topic}'...")
-        
-        # Reset stats
-        initial_delivered = self.stats['delivered']
-        initial_failed = self.stats['failed']
-        
-        # Produce all messages
-        for news_item in news_items:
-            self.produce_news_item(news_item, topic)
-        
-        # Wait for all messages to be delivered
-        remaining = self.producer.flush(timeout=30)
-        
-        if remaining > 0:
-            logger.warning(f"{remaining} messages were not delivered")
-        
-        # Calculate batch results
-        delivered = self.stats['delivered'] - initial_delivered
-        failed = self.stats['failed'] - initial_failed
-        
-        logger.info(
-            f"✓ Batch complete: {delivered} delivered, {failed} failed"
-        )
-        
-        return {
-            'total': len(news_items),
-            'delivered': delivered,
-            'failed': failed,
-            'success_rate': (delivered / len(news_items) * 100) if news_items else 0
-        }
-    
-    def produce_by_category(
-        self,
-        news_items: List[NewsItem]
-    ) -> Dict[str, Dict[str, int]]:
-        """
-        Produce news items grouped by category to raw topic
-        
-        Args:
-            news_items: List of NewsItem objects
-            
-        Returns:
-            Dictionary with results per category
-        """
-        # Group by category
-        by_category = {}
-        for item in news_items:
-            if item.category not in by_category:
-                by_category[item.category] = []
-            by_category[item.category].append(item)
-        
-        results = {}
-        
-        # Produce each category
-        for category, items in by_category.items():
-            logger.info(f"Producing {len(items)} {category} articles...")
-            result = self.produce_batch(items, self.topics['raw'])
-            results[category] = result
-        
-        return results
-    
-    def get_stats(self) -> Dict:
-        """Get producer statistics"""
-        return {
-            'total_delivered': self.stats['delivered'],
-            'total_failed': self.stats['failed'],
-            'success_rate': (
-                self.stats['delivered'] / 
-                (self.stats['delivered'] + self.stats['failed']) * 100
-                if (self.stats['delivered'] + self.stats['failed']) > 0
-                else 0
-            )
-        }
-    
-    def health_check(self) -> Dict:
-        """
-        Check Kafka connection health
-        
-        Returns:
-            Health status dictionary
-        """
+
+    def produce_dlq_event(self, topic: str, event: Any):
+        """Produce a DLQ event (accepts DLQEvent object)"""
         try:
-            metadata = self.admin_client.list_topics(timeout=5)
-            
+            # Serialize
+            key = event.event_id
+            value = event.to_json()
+
+            self.producer.produce(
+                topic=topic,
+                key=key.encode("utf-8"),
+                value=value.encode("utf-8"),
+                callback=self._delivery_callback,
+            )
+            self.producer.poll(0)
+            self.producer.flush()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to produce DLQ event: {e}")
+            return False
+
+    def produce_by_category(self, news_items: List[NewsItem]) -> Dict:
+        """
+        Produce a list of news items to the raw-news-feed topic.
+        Returns statistics about the operation.
+        """
+        stats = {}
+
+        # Group by category (though we currently send all to raw-news-feed)
+        # We keep the structure for stats reporting
+
+        for item in news_items:
+            category = item.category
+            if category not in stats:
+                stats[category] = {"total": 0, "delivered": 0, "failed": 0}
+
+            stats[category]["total"] += 1
+
+            # Send to raw processing topic
+            success = self.produce_news_item("raw-news-feed", item)
+
+            if success:
+                stats[category]["delivered"] += 1
+            else:
+                stats[category]["failed"] += 1
+
+        # Calculate rates
+        for cat in stats:
+            total = stats[cat]["total"]
+            if total > 0:
+                stats[cat]["success_rate"] = (stats[cat]["delivered"] / total) * 100
+            else:
+                stats[cat]["success_rate"] = 0
+
+        # Flush to ensure all messages are sent
+        self.producer.flush()
+
+        return stats
+
+    def get_stats(self):
+        """Get producer statistics (simplified)"""
+        return {"queue_depth": len(self.producer)}
+
+    def health_check(self) -> Dict:
+        """Check connection to Kafka"""
+        try:
+            admin_client = AdminClient({"bootstrap.servers": self.bootstrap_servers})
+            metadata = admin_client.list_topics(timeout=5)
+            broker_count = len(metadata.brokers)
             return {
-                'status': 'healthy',
-                'connected': True,
-                'broker_count': len(metadata.brokers),
-                'topic_count': len(metadata.topics),
-                'topics': list(metadata.topics.keys())
+                "connected": broker_count > 0,
+                "brokers": broker_count,
+                "topics": len(metadata.topics),
             }
         except Exception as e:
-            return {
-                'status': 'unhealthy',
-                'connected': False,
-                'error': str(e)
-            }
-    
+            return {"connected": False, "error": str(e)}
+
     def close(self):
-        """Close producer and flush remaining messages"""
-        logger.info("Closing Kafka producer...")
-        remaining = self.producer.flush(timeout=10)
-        if remaining > 0:
-            logger.warning(f"{remaining} messages were not delivered before close")
-        logger.info("✓ Producer closed")
-
-
-# Example usage
-if __name__ == "__main__":
-    from datetime import datetime, timezone
-    
-    # Initialize producer
-    producer = NewsKafkaProducer(bootstrap_servers="localhost:9093")
-    
-    # Health check
-    health = producer.health_check()
-    print(f"Kafka Health: {health}")
-    
-    # Create topics
-    producer.create_topics_if_not_exist()
-    
-    # Create sample news item
-    sample_news = NewsItem(
-        title="Test Article: Kafka Integration Working",
-        description="This is a test article to verify Kafka integration",
-        url="https://example.com/test",
-        category="technology",
-        source="Test Source",
-        published_date=datetime.now(timezone.utc),
-        fetched_at=datetime.now(timezone.utc),
-        content="Full content of the test article goes here..."
-    )
-    
-    # Produce single message
-    print("\nProducing single message...")
-    success = producer.produce_news_item(sample_news)
-    print(f"Message queued: {success}")
-    
-    # Get stats
-    stats = producer.get_stats()
-    print(f"\nProducer Stats: {stats}")
-    
-    # Close
-    producer.close()
+        """Flush and close producer"""
+        self.producer.flush()

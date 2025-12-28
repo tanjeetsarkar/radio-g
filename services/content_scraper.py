@@ -73,7 +73,7 @@ class ContentScraper:
         except Exception:
             return False
     
-    def scrape_article(self, url: str, fallback_description: str = "") -> Tuple[Optional[str], Optional[str]]:
+    def scrape_article(self, url: str, fallback_description: str = "") -> Tuple[Optional[str], Optional[str], dict]:
         """
         Scrape full article content and image from URL
         
@@ -82,32 +82,42 @@ class ContentScraper:
             fallback_description: RSS description to use if scraping fails
         
         Returns:
-            Tuple of (content, image_url)
+            Tuple of (content, image_url, meta)
+            meta.status values: scraped_newspaper | scraped_bs | fallback_blocked_domain | fallback_description | fallback_error
         """
         
         # Check if domain is blocked - use fallback immediately
         if self._is_blocked_domain(url):
             logger.info(f"Known blocked domain, using RSS description: {url}")
-            return fallback_description, None
+            return fallback_description, None, {
+                "status": "fallback_blocked_domain",
+                "reason": "blocked domain/paywall",
+            }
         
         try:
             # Try newspaper3k first (best for news articles)
             content, image = self._scrape_with_newspaper(url)
             if content and len(content) > 200:  # Minimum meaningful content
-                return content, image
+                return content, image, {"status": "scraped_newspaper"}
             
             # Fallback to BeautifulSoup
             content, image = self._scrape_with_beautifulsoup(url)
             if content and len(content) > 200:
-                return content, image
+                return content, image, {"status": "scraped_bs"}
             
             # If both fail, use RSS description
             logger.warning(f"Scraping failed, using RSS description for: {url}")
-            return fallback_description, image
+            return fallback_description, image, {
+                "status": "fallback_description",
+                "reason": "scraping_failed",
+            }
             
         except Exception as e:
             logger.error(f"Failed to scrape {url}: {str(e)}")
-            return fallback_description, None
+            return fallback_description, None, {
+                "status": "fallback_error",
+                "reason": str(e),
+            }
     
     def _scrape_with_newspaper(self, url: str) -> Tuple[Optional[str], Optional[str]]:
         """Use newspaper3k library for article extraction"""
