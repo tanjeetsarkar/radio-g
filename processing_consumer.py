@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
@@ -13,37 +13,27 @@ from models.news_item import NewsItem
 from models.dlq_event import DLQEvent
 from config.config import get_config
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class ProcessedNewsItem:
-    """Processed news item with translations and audio"""
-
-    # Original data
     original_id: Optional[str]
     original_title: str
     original_url: str
     category: str
     source: str
     published_date: str
-
-    # Processed data
     language: str
     summary: str
     translated_summary: str
     audio_file: str
     audio_duration: float
-
-    # Metadata
     processed_at: str
     processing_provider: str
     tts_provider: str
 
     def to_json(self) -> str:
-        """Convert to JSON string"""
         return json.dumps(asdict(self))
 
     @classmethod
@@ -53,48 +43,40 @@ class ProcessedNewsItem:
 
 
 class NewsProcessingConsumer:
-    """
-    Consumes raw news, processes it (translate + TTS), and produces to language topics.
-    Handles failures by sending them to DLQ.
-    """
-
     def __init__(
         self,
-        kafka_bootstrap_servers: str = "localhost:9093",
+        kafka_config: Union[str, Dict] = "localhost:9093",
         translation_provider: str = "mock",
         tts_provider: str = "mock",
         translation_api_key: Optional[str] = None,
         tts_api_key: Optional[str] = None,
         output_dir: str = "audio_output",
     ):
-        logger.info("=" * 80)
-        logger.info("INITIALIZING NEWS PROCESSING CONSUMER (WITH DLQ)")
-        logger.info("=" * 80)
-
-        logger.info("Initializing Language manager")
+        logger.info("INITIALIZING NEWS PROCESSING CONSUMER")
+        
         self.language_manager = get_language_manager()
 
-        logger.info("Initializing Kafka Consumer...")
+        # Initialize Consumer with full config (SASL enabled)
         self.consumer = NewsKafkaConsumer(
-            bootstrap_servers=kafka_bootstrap_servers,
+            bootstrap_servers=kafka_config,
             group_id="news-processing-group",
             auto_offset_reset="earliest",
         )
         self.consumer.subscribe(["raw-news-feed"])
 
-        logger.info("Initializing Kafka Producer...")
-        self.producer = NewsKafkaProducer(bootstrap_servers=kafka_bootstrap_servers)
+        # Initialize Producer with full config
+        self.producer = NewsKafkaProducer(bootstrap_servers=kafka_config)
 
-        logger.info(f"Initializing Translation Service ({translation_provider})...")
         self.translation_service = TranslationService(
             provider=translation_provider,
             api_key=translation_api_key,
             model="gemini-2.5-flash",
         )
 
-        logger.info(f"Initializing TTS Service ({tts_provider})...")
         self.tts_service = TTSService(
-            provider=tts_provider, api_key=tts_api_key, output_dir=output_dir
+            provider=tts_provider, 
+            api_key=tts_api_key, 
+            output_dir=output_dir
         )
 
         self.stats = {
@@ -110,10 +92,6 @@ class NewsProcessingConsumer:
         logger.info("=" * 80 + "\n")
 
     def process_news_item(self, news_item: NewsItem) -> List[ProcessedNewsItem]:
-        """
-        Process a single news item for all target languages.
-        If a specific language fails, it is sent to DLQ but others continue.
-        """
         processed_items = []
         languages_config = self.language_manager.get_config()
 
@@ -124,6 +102,8 @@ class NewsProcessingConsumer:
 
         text_to_process = news_item.content or news_item.description
 
+        logger.info(f"Processing: {news_item.title[:40]}... (Langs: {list(languages_config.keys())})")
+
         for lang_code, config in languages_config.items():
             if not config.get("enabled", True):
                 continue
@@ -131,6 +111,7 @@ class NewsProcessingConsumer:
 
             # Step 1: Translate and summarize
             try:
+                # 1. Translate
                 result = self.translation_service.translate_and_summarize(
                     text=text_to_process, target_language=lang_code, max_length=200
                 )
@@ -209,22 +190,20 @@ class NewsProcessingConsumer:
         return processed_items
 
     def produce_processed_items(self, processed_items: List[ProcessedNewsItem]):
-        """Produce processed items to language-specific Kafka topics"""
         for item in processed_items:
             lang_config = self.language_manager.get_config().get(item.language, {})
             lang_name = lang_config.get("name", item.language).lower()
             topic = f"news-{lang_name}"
-
+            
             try:
-                message_value = item.to_json()
                 self.producer.producer.produce(
                     topic=topic,
                     key=item.original_id.encode("utf-8"),
-                    value=message_value.encode("utf-8"),
+                    value=item.to_json().encode("utf-8"),
                     callback=self.producer._delivery_callback,
                 )
             except Exception as e:
-                logger.error(f"Failed to produce {item.language} item: {e}")
+                logger.error(f"Produce failed for {item.language}: {e}")
 
     def run_continuous(self, batch_size: int = 5):
         """Run continuous processing loop"""
@@ -299,7 +278,6 @@ class NewsProcessingConsumer:
 
 def main():
     import argparse
-
     config = get_config()
 
     parser = argparse.ArgumentParser(description="News Processing Consumer")
@@ -310,11 +288,15 @@ def main():
         "--translation-provider", default=config.api.translation_provider
     )
     parser.add_argument("--tts-provider", default=config.api.tts_provider)
-
     args = parser.parse_args()
 
+    # Determine correct Kafka config (String vs Dict)
+    kafka_config = args.kafka
+    if args.kafka == config.kafka.bootstrap_servers:
+        kafka_config = config.kafka.connection_config
+
     consumer = NewsProcessingConsumer(
-        kafka_bootstrap_servers=args.kafka,
+        kafka_config=kafka_config,
         translation_provider=args.translation_provider,
         tts_provider=args.tts_provider,
         translation_api_key=config.api.gemini_api_key,
@@ -326,7 +308,6 @@ def main():
         consumer.process_batch(max_messages=args.max)
     else:
         consumer.run_continuous()
-
 
 if __name__ == "__main__":
     main()

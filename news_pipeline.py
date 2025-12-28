@@ -7,7 +7,7 @@ import logging
 import time
 import schedule
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Union, Optional
 import sys
 import argparse
 
@@ -28,46 +28,51 @@ logger = logging.getLogger(__name__)
 
 
 class NewsPipeline:
-    """
-    Complete news ingestion pipeline
-    Orchestrates fetching, deduplication, and Kafka production
-    """
-
     def __init__(
         self,
-        kafka_bootstrap_servers: Optional[str] = None,
+        kafka_bootstrap_servers: Optional[Union[str, Dict]] = None,
         redis_host: Optional[str] = None,
-        redis_port: int = None,
+        redis_port: Optional[int] = None,
         enable_deduplication: bool = True,
     ):
-        # Load config if values not provided
         self.config = get_config()
-        
-        # Use provided values or fall back to config
-        self.kafka_servers = kafka_bootstrap_servers or self.config.kafka.bootstrap_servers
+
+        # Logic to determine if we should use the full dictionary config (SASL) or just a string
+        if kafka_bootstrap_servers:
+            # If user provided an argument...
+            if kafka_bootstrap_servers == self.config.kafka.bootstrap_servers:
+                # If it matches the string in config, prefer the full connection dict (which includes auth)
+                self.kafka_config = self.config.kafka.connection_config
+            else:
+                # If it's different (e.g. localhost override), use it as is
+                self.kafka_config = kafka_bootstrap_servers
+        else:
+            # Default to full config
+            self.kafka_config = self.config.kafka.connection_config
+
         self.redis_host = redis_host or self.config.redis.host
         self.redis_port = redis_port or self.config.redis.port
-        
+
         logger.info("=" * 80)
-        logger.info("INITIALIZING NEWS INGESTION PIPELINE (WITH DLQ)")
-        logger.info(f"Kafka: {self.kafka_servers}")
+        logger.info("INITIALIZING NEWS INGESTION PIPELINE")
+
+        # Safe logging of config type
+        if isinstance(self.kafka_config, dict):
+            logger.info(
+                f"Kafka Config Mode: SASL/Secure (Keys: {list(self.kafka_config.keys())})"
+            )
+        else:
+            logger.info(f"Kafka Config Mode: Simple String ({self.kafka_config})")
+
         logger.info(f"Redis: {self.redis_host}:{self.redis_port}")
         logger.info("=" * 80)
 
-        # Initialize news fetcher
-        logger.info("Initializing News Fetcher...")
-        # NewsFetcher handles its own internal dependencies/config for Redis
         self.fetcher = NewsFetcher(use_deduplication=enable_deduplication)
+        self.producer = NewsKafkaProducer(bootstrap_servers=self.kafka_config)
 
-        # Initialize Kafka producer
-        logger.info("Initializing Kafka Producer...")
-        self.producer = NewsKafkaProducer(bootstrap_servers=self.kafka_servers)
-
-        # Create Kafka topics if needed (including DLQs)
         logger.info("Creating Kafka topics...")
         self.producer.create_topics_if_not_exist()
 
-        # Pipeline statistics
         self.total_runs = 0
         self.total_articles_fetched = 0
         self.total_articles_produced = 0
@@ -76,30 +81,22 @@ class NewsPipeline:
         logger.info("✓ Pipeline initialized successfully")
 
     def health_check(self) -> Dict:
-        """Check health of all pipeline components"""
         logger.info("Running health checks...")
-
         health = {
             "timestamp": datetime.now().isoformat(),
             "kafka": self.producer.health_check(),
             "redis": None,
         }
-
-        # Check Redis if deduplication is enabled
         if self.fetcher.deduplicator:
             health["redis"] = self.fetcher.deduplicator.check_health()
 
-        # Overall status
         kafka_ok = health["kafka"]["connected"]
         redis_ok = health["redis"]["connected"] if health["redis"] else True
-
         health["overall"] = "healthy" if (kafka_ok and redis_ok) else "degraded"
-
         logger.info(f"Health Check: {health['overall'].upper()}")
         return health
 
     def run_once(self) -> Dict:
-        """Run the pipeline once: fetch news and produce to Kafka"""
         self.total_runs += 1
         run_start = time.time()
 
@@ -109,16 +106,14 @@ class NewsPipeline:
         logger.info("=" * 80)
 
         try:
-            # Step 1: Fetch news from all sources
-            logger.info("\n[Step 1/2] Fetching news from RSS feeds...")
+            logger.info("[Step 1/2] Fetching news...")
             fetch_result = self.fetcher.fetch_all_feeds()
-            if isinstance(fetch_result, tuple) and len(fetch_result) == 2:
+
+            if isinstance(fetch_result, tuple):
                 news_items, failures = fetch_result
             else:
-                news_items = fetch_result  # Backwards-compatible with older tests
-                failures = []
+                news_items, failures = fetch_result, []
 
-            # Handle Failures immediately (DLQ)
             if failures:
                 logger.warning(f"⚠ Sending {len(failures)} failures to DLQ-Ingestion")
                 for failure in failures:
@@ -139,11 +134,8 @@ class NewsPipeline:
             self.total_articles_fetched += len(news_items)
             logger.info(f"✓ Fetched {len(news_items)} unique articles")
 
-            # Step 2: Produce to Kafka
-            logger.info("\n[Step 2/2] Producing to Kafka...")
+            logger.info(f"[Step 2/2] Producing {len(news_items)} items to Kafka...")
             results = self.producer.produce_by_category(news_items)
-
-            # Calculate totals
             total_produced = sum(r["delivered"] for r in results.values())
             total_kafka_failed = sum(r["failed"] for r in results.values())
 
@@ -180,12 +172,8 @@ class NewsPipeline:
             }
 
         except Exception as e:
-            logger.error(f"Pipeline run failed: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e),
-                "duration_seconds": time.time() - run_start,
-            }
+            logger.error(f"Pipeline failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
     def run_continuous(self, interval_minutes: int = 15):
         """Run pipeline continuously at specified interval"""
@@ -199,13 +187,11 @@ class NewsPipeline:
 
         logger.info("Running initial fetch...")
         self.run_once()
-
         try:
             while True:
                 schedule.run_pending()
                 time.sleep(1)
         except KeyboardInterrupt:
-            logger.info("\n\nShutting down pipeline...")
             self.shutdown()
 
     def get_stats(self) -> Dict:
@@ -226,29 +212,24 @@ class NewsPipeline:
         return stats
 
     def shutdown(self):
-        """Gracefully shutdown pipeline"""
-        logger.info("Closing Kafka producer...")
+        logger.info("Shutting down...")
         self.producer.close()
         logger.info("✓ Pipeline shutdown complete")
 
 
 def main():
-    """Main entry point"""
-    # Load configuration
     config = get_config()
-
-    parser = argparse.ArgumentParser(description="News Ingestion Pipeline")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["once", "continuous"], default="once")
-    parser.add_argument("--interval", type=int, default=config.app.fetch_interval_minutes)
+    parser.add_argument(
+        "--interval", type=int, default=config.app.fetch_interval_minutes
+    )
     parser.add_argument("--kafka", default=config.kafka.bootstrap_servers)
     parser.add_argument("--redis-host", default=config.redis.host)
     parser.add_argument("--redis-port", type=int, default=config.redis.port)
     parser.add_argument("--no-dedup", action="store_true")
-
     args = parser.parse_args()
 
-    # Determine deduplication setting
-    # Priority: Flag override > Config value > Default True
     enable_dedup = config.app.enable_deduplication
     if args.no_dedup:
         enable_dedup = False

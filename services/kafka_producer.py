@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
 from models.news_item import NewsItem
@@ -15,19 +15,36 @@ class NewsKafkaProducer:
     Handles serialization and delivery callbacks.
     """
 
-    def __init__(self, bootstrap_servers: str = "localhost:9093"):
-        self.bootstrap_servers = bootstrap_servers
-        self.producer_config = {
-            "bootstrap.servers": bootstrap_servers,
+    def __init__(self, bootstrap_servers: Union[str, Dict] = "localhost:9093"):
+        # Handle configuration: if dict, use it; if str, wrap it
+        if isinstance(bootstrap_servers, dict):
+            self.producer_config = bootstrap_servers.copy()
+            self.bootstrap_servers = self.producer_config.get(
+                "bootstrap.servers", "unknown"
+            )
+        else:
+            self.bootstrap_servers = bootstrap_servers
+            self.producer_config = {"bootstrap.servers": bootstrap_servers}
+
+        # Add producer-specific defaults if not already present
+        defaults = {
             "client.id": "news-producer",
-            "linger.ms": 100,  # Small delay to allow batching
+            "linger.ms": 100,
             "compression.type": "gzip",
             "retries": 3,
         }
+        for k, v in defaults.items():
+            if k not in self.producer_config:
+                self.producer_config[k] = v
 
         try:
+            # Log config (masking password)
+            log_config = self.producer_config.copy()
+            if "sasl.password" in log_config:
+                log_config["sasl.password"] = "***"
+
+            logger.info(f"Kafka Producer initialized with config: {log_config}")
             self.producer = Producer(self.producer_config)
-            logger.info(f"Kafka Producer initialized (servers: {bootstrap_servers})")
         except Exception as e:
             logger.error(f"Failed to initialize Kafka Producer: {e}")
             raise
@@ -37,7 +54,6 @@ class NewsKafkaProducer:
         if err:
             logger.error(f"Message delivery failed: {err}")
         else:
-            # logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
             pass
 
     def create_topics_if_not_exist(self, topics: Optional[List[str]] = None):
@@ -48,11 +64,12 @@ class NewsKafkaProducer:
                 "news-english",
                 "news-hindi",
                 "news-bengali",
-                "dlq-ingestion",  # NEW
-                "dlq-processing",  # NEW
+                "dlq-ingestion",
+                "dlq-processing",
             ]
 
-        admin_client = AdminClient({"bootstrap.servers": self.bootstrap_servers})
+        # Use full config for AdminClient (needed for SASL auth)
+        admin_client = AdminClient(self.producer_config)
 
         try:
             # Check existing topics
@@ -62,18 +79,15 @@ class NewsKafkaProducer:
             new_topics = []
             for topic in topics:
                 if topic not in existing_topics:
-                    # Create topic with default settings
                     new_topics.append(
                         NewTopic(topic, num_partitions=3, replication_factor=1)
                     )
 
             if new_topics:
                 fs = admin_client.create_topics(new_topics)
-
-                # Wait for each operation to finish
                 for topic, f in fs.items():
                     try:
-                        f.result()  # The result itself is None
+                        f.result()
                         logger.info(f"Topic '{topic}' created")
                     except Exception as e:
                         logger.error(f"Failed to create topic '{topic}': {e}")
@@ -95,8 +109,6 @@ class NewsKafkaProducer:
                 value=value.encode("utf-8"),
                 callback=self._delivery_callback,
             )
-
-            # Trigger poll to serve delivery callbacks
             self.producer.poll(0)
             return True
 
@@ -104,10 +116,10 @@ class NewsKafkaProducer:
             logger.error(f"Failed to produce message: {e}")
             return False
 
-    def produce_batch(self, news_items: List[NewsItem], topic: str = "raw-news-feed") -> Dict[str, Any]:
-        """Produce a batch of news items and return delivery stats"""
+    def produce_batch(
+        self, news_items: List[NewsItem], topic: str = "raw-news-feed"
+    ) -> Dict[str, Any]:
         stats = {"total": len(news_items), "delivered": 0, "failed": 0}
-
         for item in news_items:
             success = self.produce_news_item(item, topic=topic)
             if success:
@@ -115,7 +127,6 @@ class NewsKafkaProducer:
             else:
                 stats["failed"] += 1
 
-        # Calculate success rate and flush pending messages
         stats["success_rate"] = (
             (stats["delivered"] / stats["total"]) * 100 if stats["total"] else 0
         )
@@ -123,15 +134,20 @@ class NewsKafkaProducer:
         return stats
 
     def produce_dlq_event(self, topic: str, event: Any):
-        """Produce a DLQ event (accepts DLQEvent object)"""
         try:
-            # Serialize
-            key = event.event_id
-            value = event.to_json()
+            # Handle both DLQEvent object or dict
+            if hasattr(event, "to_json"):
+                value = event.to_json()
+                key = event.event_id if hasattr(event, "event_id") else None
+            else:
+                import json
+
+                value = json.dumps(event)
+                key = None
 
             self.producer.produce(
                 topic=topic,
-                key=key.encode("utf-8"),
+                key=key.encode("utf-8") if key else None,
                 value=value.encode("utf-8"),
                 callback=self._delivery_callback,
             )
@@ -143,51 +159,35 @@ class NewsKafkaProducer:
             return False
 
     def produce_by_category(self, news_items: List[NewsItem]) -> Dict:
-        """
-        Produce a list of news items to the raw-news-feed topic.
-        Returns statistics about the operation.
-        """
         stats = {}
-
-        # Group by category (though we currently send all to raw-news-feed)
-        # We keep the structure for stats reporting
-
         for item in news_items:
             category = item.category
             if category not in stats:
                 stats[category] = {"total": 0, "delivered": 0, "failed": 0}
-
             stats[category]["total"] += 1
 
-            # Send to raw processing topic
             success = self.produce_news_item(item, topic="raw-news-feed")
-
             if success:
                 stats[category]["delivered"] += 1
             else:
                 stats[category]["failed"] += 1
 
-        # Calculate rates
         for cat in stats:
             total = stats[cat]["total"]
-            if total > 0:
-                stats[cat]["success_rate"] = (stats[cat]["delivered"] / total) * 100
-            else:
-                stats[cat]["success_rate"] = 0
+            stats[cat]["success_rate"] = (
+                (stats[cat]["delivered"] / total) * 100 if total > 0 else 0
+            )
 
-        # Flush to ensure all messages are sent
         self.producer.flush()
-
         return stats
 
     def get_stats(self):
-        """Get producer statistics (simplified)"""
         return {"queue_depth": len(self.producer)}
 
     def health_check(self) -> Dict:
-        """Check connection to Kafka"""
         try:
-            admin_client = AdminClient({"bootstrap.servers": self.bootstrap_servers})
+            # Use full config for auth
+            admin_client = AdminClient(self.producer_config)
             metadata = admin_client.list_topics(timeout=5)
             broker_count = len(metadata.brokers)
             topic_names = list(metadata.topics.keys())
@@ -202,5 +202,4 @@ class NewsKafkaProducer:
             return {"connected": False, "status": "unhealthy", "error": str(e)}
 
     def close(self):
-        """Flush and close producer"""
         self.producer.flush()
