@@ -132,7 +132,7 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
     
     # Seed language configuration
     echo -e "${BLUE}💾 Seeding language configuration...${NC}"
-    docker compose exec -T redis redis-cli SET languages:config '{"languages":[{"code":"en","name":"English","voice_id":"21m00Tcm4TlvDq8ikWAM"},{"code":"hi","name":"Hindi","voice_id":"pNInz6obpgDQGcFmaJgB"},{"code":"bn","name":"Bengali","voice_id":"onwK4e9ZLuTAKqWW03F9"}]}'
+    docker compose exec -T redis redis-cli SET config:languages '{"languages":[{"code":"en","name":"English","voice_id":"21m00Tcm4TlvDq8ikWAM"},{"code":"hi","name":"Hindi","voice_id":"pNInz6obpgDQGcFmaJgB"},{"code":"bn","name":"Bengali","voice_id":"onwK4e9ZLuTAKqWW03F9"}]}'
     
     echo -e "${GREEN}✅ Language configuration seeded${NC}"
     
