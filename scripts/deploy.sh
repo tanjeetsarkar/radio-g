@@ -439,7 +439,7 @@ EOF
         --cpu ${PROCESSOR_CPU:-2} \
         --min-instances ${PROCESSOR_MIN_INSTANCES:-1} \
         --max-instances ${PROCESSOR_MAX_INSTANCES:-10} \
-        --set-env-vars="${COMMON_ENV_VARS},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs}" \
+        --set-env-vars="${COMMON_ENV_VARS},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs},GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT},GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global},GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-True}" \
         --set-secrets="${PROCESSOR_SECRETS}"
     
     echo -e "${GREEN}✅ Processor deployed${NC}"
