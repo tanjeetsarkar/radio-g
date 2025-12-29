@@ -93,7 +93,6 @@ api-key-*.txt
 application_default_credentials.json
 
 # Scripts
-scripts/
 run_tests.sh
 
 # Other

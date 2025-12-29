@@ -26,6 +26,7 @@ COPY config/ ./config/
 COPY models/ ./models/
 COPY services/ ./services/
 COPY utils/ ./utils/
+COPY scripts/*.py ./scripts/
 COPY main.py ./
 
 # Create directories

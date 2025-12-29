@@ -130,9 +130,6 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
         exit 1
     fi
     
-    # Seed language configuration
-    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
-    docker compose exec -T news-api uv run python /app/scripts/seed_languages.py
     
     echo -e "${GREEN}✅ Language configuration seeded${NC}"
     
@@ -142,6 +139,10 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
     
     echo "⏳ Waiting for API to be healthy..."
     sleep 30
+    
+    # Seed language configuration
+    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
+    docker compose exec -T news-api uv run python /app/scripts/seed_languages.py
     
     # Wait for API
     API_HEALTHY=false
