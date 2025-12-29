@@ -110,6 +110,9 @@ services:
       
       # Kafka
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_USERNAME: ${KAFKA_USERNAME:-}
+      KAFKA_PASSWORD: ${KAFKA_PASSWORD:-}
+      KAFKA_CREDENTIALS: ${KAFKA_CREDENTIALS:-}
       
       # Fetcher settings
       FETCH_INTERVAL_MINUTES: ${FETCH_INTERVAL_MINUTES:-15}
@@ -155,6 +158,9 @@ services:
       
       # Kafka
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_USERNAME: ${KAFKA_USERNAME:-}
+      KAFKA_PASSWORD: ${KAFKA_PASSWORD:-}
+      KAFKA_CREDENTIALS: ${KAFKA_CREDENTIALS:-}
       
       # Processing settings
       MAX_WORKERS: ${MAX_WORKERS:-4}
@@ -198,6 +204,9 @@ services:
       
       # Kafka
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_USERNAME: ${KAFKA_USERNAME:-}
+      KAFKA_PASSWORD: ${KAFKA_PASSWORD:-}
+      KAFKA_CREDENTIALS: ${KAFKA_CREDENTIALS:-}
       
       # API settings
       PORT: 8000

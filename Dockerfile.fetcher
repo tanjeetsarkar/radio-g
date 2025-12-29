@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     libxml2-dev \
     libxslt-dev \
     curl \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast package management
@@ -33,9 +34,9 @@ COPY news_pipeline.py ./
 # Create directories
 RUN mkdir -p logs
 
-# Health check (check if process is running)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD pgrep -f news_pipeline.py || exit 1
+# Health check (check if Python process is running)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD pgrep -f python || exit 1
 
 # Run the fetcher
 CMD ["uv", "run", "news_pipeline.py", "--mode", "continuous"]

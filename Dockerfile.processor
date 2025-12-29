@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     curl \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast package management
@@ -31,9 +32,9 @@ COPY processing_consumer.py ./
 # Create directories
 RUN mkdir -p logs audio_output
 
-# Health check (check if process is running)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=40s --retries=3 \
-    CMD pgrep -f processing_consumer.py || exit 1
+# Health check (check if Python process is running)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD pgrep -f python || exit 1
 
 # Run the processor
 CMD ["uv", "run", "processing_consumer.py", "--mode", "continuous"]

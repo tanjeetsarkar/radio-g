@@ -315,8 +315,30 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     # Construct Kafka bootstrap servers
     KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP_SERVERS}"
     
+    # Check for Kafka credentials
+    if [ -n "${KAFKA_CREDENTIALS}" ]; then
+        echo -e "${GREEN}✅ Using KAFKA_CREDENTIALS from environment${NC}"
+    elif [ -n "${KAFKA_USERNAME}" ] && [ -n "${KAFKA_PASSWORD}" ]; then
+        echo -e "${GREEN}✅ Using KAFKA_USERNAME and KAFKA_PASSWORD from environment${NC}"
+    else
+        echo -e "${YELLOW}⚠️  No Kafka credentials found - using unauthenticated connection${NC}"
+    fi
+    
     # Deploy API Service
     echo -e "${BLUE}Deploying API service...${NC}"
+    
+    # Create temporary env vars file to handle special characters in URLs
+    cat > /tmp/api-env-vars.yaml <<EOF
+ENVIRONMENT: ${ENVIRONMENT}
+LOG_LEVEL: ${LOG_LEVEL}
+REDIS_HOST: ${REDIS_HOST_GCP}
+KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP}
+KAFKA_USERNAME: ${KAFKA_USERNAME:-}
+KAFKA_PASSWORD: ${KAFKA_PASSWORD:-}
+KAFKA_CREDENTIALS: ${KAFKA_CREDENTIALS:-}
+ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+EOF
+    
     gcloud run deploy news-api \
         --image ${REGISTRY}/${GCP_PROJECT_ID}/news-api:latest \
         --platform managed \
@@ -327,8 +349,11 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
         --cpu ${API_CPU:-1} \
         --min-instances ${API_MIN_INSTANCES:-1} \
         --max-instances ${API_MAX_INSTANCES:-10} \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" \
+        --env-vars-file=/tmp/api-env-vars.yaml \
         --set-secrets="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
+    
+    # Clean up
+    rm /tmp/api-env-vars.yaml
     
     DEPLOYED_API_URL=$(gcloud run services describe news-api --region $GCP_REGION --format 'value(status.url)')
     echo -e "${GREEN}✅ API deployed: ${DEPLOYED_API_URL}${NC}"
@@ -344,7 +369,7 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
         --cpu ${PROCESSOR_CPU:-2} \
         --min-instances ${PROCESSOR_MIN_INSTANCES:-1} \
         --max-instances ${PROCESSOR_MAX_INSTANCES:-10} \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP}" \
+        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},KAFKA_USERNAME=${KAFKA_USERNAME:-},KAFKA_PASSWORD=${KAFKA_PASSWORD:-},KAFKA_CREDENTIALS=${KAFKA_CREDENTIALS:-}" \
         --set-secrets="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
     
     echo -e "${GREEN}✅ Processor deployed${NC}"
@@ -358,7 +383,7 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
         --cpu ${FETCHER_CPU:-1} \
         --task-timeout ${FETCHER_TIMEOUT:-15m} \
         --max-retries 3 \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP}" \
+        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},KAFKA_USERNAME=${KAFKA_USERNAME:-},KAFKA_PASSWORD=${KAFKA_PASSWORD:-},KAFKA_CREDENTIALS=${KAFKA_CREDENTIALS:-}" \
         --set-secrets="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest" \
         2>/dev/null || echo "Job already exists, updating..."
     
