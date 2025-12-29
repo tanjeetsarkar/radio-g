@@ -85,6 +85,37 @@ services:
   # Application Services
   # ============================================
 
+  # Language Configuration Seed Service
+  news-seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.seed
+    container_name: news_seed
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_SSL: "false"
+      REDIS_DB: 0
+      
+      # Kafka (minimal defaults - not used by seed but required by get_config)
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      
+      # API providers (not used by seed but required by get_config)
+      TRANSLATION_PROVIDER: mock
+      TTS_PROVIDER: mock
+    networks:
+      - news_network
+    profiles:
+      - seed  # Only run when explicitly requested
+
   # News Fetcher Service
   news-fetcher:
     build:

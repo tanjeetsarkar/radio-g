@@ -1,0 +1,38 @@
+# ============================================
+# Minimal Dockerfile for Language Seeding Job
+# ============================================
+# This is a lightweight image that only includes dependencies
+# needed for seeding Redis with language configuration.
+# No API keys or Kafka dependencies required.
+# ============================================
+
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install uv for package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy only the necessary files for seeding
+COPY pyproject.toml uv.lock ./
+
+# Install only core dependencies (redis client)
+RUN uv sync --no-dev --frozen
+
+# Copy application code (only what's needed)
+COPY config/ ./config/
+COPY services/language_manager.py ./services/
+COPY scripts/seed_languages.py ./scripts/
+
+# Set default environment variables
+ENV ENVIRONMENT=production \
+    LOG_LEVEL=INFO \
+    KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+    REDIS_PORT=6379 \
+    REDIS_DB=0 \
+    REDIS_SSL=false \
+    TRANSLATION_PROVIDER=mock \
+    TTS_PROVIDER=mock
+
+# Default command runs the seed script
+CMD ["uv", "run", "python", "scripts/seed_languages.py"]

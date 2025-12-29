@@ -10,6 +10,9 @@ from datetime import datetime
 from typing import Dict, Union, Optional
 import sys
 import argparse
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
 
 from services.news_fetcher import NewsFetcher
 from services.kafka_producer import NewsKafkaProducer
@@ -210,6 +213,30 @@ class NewsPipeline:
         logger.info("✓ Pipeline shutdown complete")
 
 
+class HealthHandler(BaseHTTPRequestHandler):
+    """HTTP handler for Cloud Run health checks"""
+    def do_GET(self):
+        if self.path in ["/", "/health"]:
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"healthy","service":"news-fetcher"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass  # Suppress logs
+
+
+def start_health_server(port: int = 8080):
+    """Start health server in background thread"""
+    server = HTTPServer(("", port), HealthHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info(f"✓ Health server listening on port {port}")
+
+
 def main():
     config = get_config()
     parser = argparse.ArgumentParser()
@@ -222,6 +249,10 @@ def main():
     parser.add_argument("--redis-port", type=int, default=config.redis.port)
     parser.add_argument("--no-dedup", action="store_true")
     args = parser.parse_args()
+
+    # Start health server for Cloud Run
+    port = int(os.getenv("PORT", "8080"))
+    start_health_server(port)
 
     enable_dedup = config.app.enable_deduplication
     if args.no_dedup:

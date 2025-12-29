@@ -26,7 +26,13 @@ class LanguageManager:
             'host': config.redis.host,
             'port': config.redis.port,
             'db': config.redis.db,
-            'decode_responses': True
+            'decode_responses': True,
+            'socket_connect_timeout': 10,  # Connection timeout
+            'socket_timeout': 10,  # Operation timeout
+            'socket_keepalive': True,
+            'socket_keepalive_options': {},
+            'retry_on_timeout': True,
+            'health_check_interval': 30
         }
         
         # Only add password if it's not None and not empty
@@ -71,6 +77,22 @@ class LanguageManager:
         """Update configuration (Admin usage)"""
         self.redis.set(self.REDIS_KEY, json.dumps(config))
         logger.info("Language configuration updated")
+    
+    def ping(self) -> bool:
+        """Health check for Redis connection."""
+        try:
+            return self.redis.ping()
+        except Exception as e:
+            logger.error(f"Redis ping failed: {e}")
+            return False
+    
+    def close(self):
+        """Close Redis connection."""
+        try:
+            self.redis.close()
+            logger.info("Redis connection closed")
+        except Exception as e:
+            logger.warning(f"Error closing Redis: {e}")
 
 # Global accessor
 def get_language_manager():

@@ -131,6 +131,10 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
     fi
     
     
+    # Seed language configuration using dedicated seed service
+    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
+    docker compose run --rm news-seed
+    
     echo -e "${GREEN}✅ Language configuration seeded${NC}"
     
     # Start application services
@@ -139,10 +143,6 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
     
     echo "⏳ Waiting for API to be healthy..."
     sleep 30
-    
-    # Seed language configuration
-    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
-    docker compose exec -T news-api uv run python /app/scripts/seed_languages.py
     
     # Wait for API
     API_HEALTHY=false
@@ -256,6 +256,37 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
         fi
     done
     
+    # Check and create Kafka credentials secrets
+    if [ -n "${KAFKA_USERNAME}" ] && [ "${KAFKA_USERNAME}" != "" ]; then
+        if ! gcloud secrets describe kafka-username &>/dev/null; then
+            echo -e "${YELLOW}⚠️  Secret 'kafka-username' not found. Creating...${NC}"
+            echo -n "$KAFKA_USERNAME" | gcloud secrets create kafka-username --data-file=-
+        else
+            echo -e "${BLUE}Updating kafka-username secret...${NC}"
+            echo -n "$KAFKA_USERNAME" | gcloud secrets versions add kafka-username --data-file=-
+        fi
+    fi
+    
+    if [ -n "${KAFKA_PASSWORD}" ] && [ "${KAFKA_PASSWORD}" != "" ]; then
+        if ! gcloud secrets describe kafka-password &>/dev/null; then
+            echo -e "${YELLOW}⚠️  Secret 'kafka-password' not found. Creating...${NC}"
+            echo -n "$KAFKA_PASSWORD" | gcloud secrets create kafka-password --data-file=-
+        else
+            echo -e "${BLUE}Updating kafka-password secret...${NC}"
+            echo -n "$KAFKA_PASSWORD" | gcloud secrets versions add kafka-password --data-file=-
+        fi
+    fi
+    
+    if [ -n "${KAFKA_CREDENTIALS}" ] && [ "${KAFKA_CREDENTIALS}" != "" ]; then
+        if ! gcloud secrets describe kafka-credentials &>/dev/null; then
+            echo -e "${YELLOW}⚠️  Secret 'kafka-credentials' not found. Creating...${NC}"
+            echo -n "$KAFKA_CREDENTIALS" | gcloud secrets create kafka-credentials --data-file=-
+        else
+            echo -e "${BLUE}Updating kafka-credentials secret...${NC}"
+            echo -n "$KAFKA_CREDENTIALS" | gcloud secrets versions add kafka-credentials --data-file=-
+        fi
+    fi
+    
     echo -e "${GREEN}✅ All required secrets exist${NC}"
     
     # Build and push images
@@ -263,7 +294,7 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     echo -e "${BLUE}🔨 Building and pushing Docker images...${NC}"
     
     REGISTRY="gcr.io"
-    IMAGES=("api" "fetcher" "processor")
+    IMAGES=("api" "fetcher" "processor" "seed")
     
     for image in "${IMAGES[@]}"; do
         IMAGE_NAME="news-${image}"
@@ -315,11 +346,14 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     # Construct Kafka bootstrap servers
     KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP_SERVERS}"
     
-    # Check for Kafka credentials
-    if [ -n "${KAFKA_CREDENTIALS}" ]; then
-        echo -e "${GREEN}✅ Using KAFKA_CREDENTIALS from environment${NC}"
+    # Determine which Kafka secrets to use
+    KAFKA_SECRETS=""
+    if [ -n "${KAFKA_CREDENTIALS}" ] && [ "${KAFKA_CREDENTIALS}" != "" ]; then
+        echo -e "${GREEN}✅ Using KAFKA_CREDENTIALS from secrets${NC}"
+        KAFKA_SECRETS="KAFKA_CREDENTIALS=kafka-credentials:latest"
     elif [ -n "${KAFKA_USERNAME}" ] && [ -n "${KAFKA_PASSWORD}" ]; then
-        echo -e "${GREEN}✅ Using KAFKA_USERNAME and KAFKA_PASSWORD from environment${NC}"
+        echo -e "${GREEN}✅ Using KAFKA_USERNAME and KAFKA_PASSWORD from secrets${NC}"
+        KAFKA_SECRETS="KAFKA_USERNAME=kafka-username:latest,KAFKA_PASSWORD=kafka-password:latest"
     else
         echo -e "${YELLOW}⚠️  No Kafka credentials found - using unauthenticated connection${NC}"
     fi
@@ -333,24 +367,29 @@ ENVIRONMENT: ${ENVIRONMENT}
 LOG_LEVEL: ${LOG_LEVEL}
 REDIS_HOST: ${REDIS_HOST_GCP}
 KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP}
-KAFKA_USERNAME: ${KAFKA_USERNAME:-}
-KAFKA_PASSWORD: ${KAFKA_PASSWORD:-}
-KAFKA_CREDENTIALS: ${KAFKA_CREDENTIALS:-}
+TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-gemini}
+TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
 ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
 EOF
+    
+    # Build secrets string
+    API_SECRETS="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
+    if [ -n "${KAFKA_SECRETS}" ]; then
+        API_SECRETS="${API_SECRETS},${KAFKA_SECRETS}"
+    fi
     
     gcloud run deploy news-api \
         --image ${REGISTRY}/${GCP_PROJECT_ID}/news-api:latest \
         --platform managed \
         --region $GCP_REGION \
         --allow-unauthenticated \
-        --port 8080 \
+        --port 8000 \
         --memory ${API_MEMORY:-1Gi} \
         --cpu ${API_CPU:-1} \
         --min-instances ${API_MIN_INSTANCES:-1} \
         --max-instances ${API_MAX_INSTANCES:-10} \
         --env-vars-file=/tmp/api-env-vars.yaml \
-        --set-secrets="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
+        --set-secrets="${API_SECRETS}"
     
     # Clean up
     rm /tmp/api-env-vars.yaml
@@ -360,34 +399,53 @@ EOF
     
     # Deploy Processor Service
     echo -e "${BLUE}Deploying processor service...${NC}"
+    
+    # Build secrets string for processor
+    PROCESSOR_SECRETS="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
+    if [ -n "${KAFKA_SECRETS}" ]; then
+        PROCESSOR_SECRETS="${PROCESSOR_SECRETS},${KAFKA_SECRETS}"
+    fi
+    
     gcloud run deploy news-processor \
         --image ${REGISTRY}/${GCP_PROJECT_ID}/news-processor:latest \
         --platform managed \
         --region $GCP_REGION \
         --no-allow-unauthenticated \
+        --port 8080 \
+        --timeout 300 \
         --memory ${PROCESSOR_MEMORY:-2Gi} \
         --cpu ${PROCESSOR_CPU:-2} \
         --min-instances ${PROCESSOR_MIN_INSTANCES:-1} \
         --max-instances ${PROCESSOR_MAX_INSTANCES:-10} \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},KAFKA_USERNAME=${KAFKA_USERNAME:-},KAFKA_PASSWORD=${KAFKA_PASSWORD:-},KAFKA_CREDENTIALS=${KAFKA_CREDENTIALS:-}" \
-        --set-secrets="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
+        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs}" \
+        --set-secrets="${PROCESSOR_SECRETS}"
     
     echo -e "${GREEN}✅ Processor deployed${NC}"
     
-    # Deploy Fetcher as Cloud Run Job
-    echo -e "${BLUE}Deploying fetcher job...${NC}"
-    gcloud run jobs deploy news-fetcher \
+    # Deploy Fetcher Service
+    echo -e "${BLUE}Deploying fetcher service...${NC}"
+    
+    # Build secrets string for fetcher
+    FETCHER_SECRETS="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest"
+    if [ -n "${KAFKA_SECRETS}" ]; then
+        FETCHER_SECRETS="${FETCHER_SECRETS},${KAFKA_SECRETS}"
+    fi
+    
+    gcloud run deploy news-fetcher \
         --image ${REGISTRY}/${GCP_PROJECT_ID}/news-fetcher:latest \
+        --platform managed \
         --region $GCP_REGION \
+        --no-allow-unauthenticated \
+        --port 8080 \
+        --timeout 300 \
         --memory ${FETCHER_MEMORY:-512Mi} \
         --cpu ${FETCHER_CPU:-1} \
-        --task-timeout ${FETCHER_TIMEOUT:-15m} \
-        --max-retries 3 \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},KAFKA_USERNAME=${KAFKA_USERNAME:-},KAFKA_PASSWORD=${KAFKA_PASSWORD:-},KAFKA_CREDENTIALS=${KAFKA_CREDENTIALS:-}" \
-        --set-secrets="GEMINI_API_KEY=gemini-api-key:latest,ELEVENLABS_API_KEY=elevenlabs-api-key:latest" \
-        2>/dev/null || echo "Job already exists, updating..."
+        --min-instances ${FETCHER_MIN_INSTANCES:-1} \
+        --max-instances ${FETCHER_MAX_INSTANCES:-3} \
+        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP}" \
+        --set-secrets="${FETCHER_SECRETS}"
     
-    echo -e "${GREEN}✅ Fetcher job deployed${NC}"
+    echo -e "${GREEN}✅ Fetcher deployed${NC}"
     
     # Deploy Frontend
     echo -e "${BLUE}Deploying frontend...${NC}"
@@ -405,20 +463,57 @@ EOF
     FRONTEND_URL=$(gcloud run services describe news-frontend --region $GCP_REGION --format 'value(status.url)')
     echo -e "${GREEN}✅ Frontend deployed: ${FRONTEND_URL}${NC}"
     
-    # Trigger initial fetch
+    # Seed language configuration
     echo ""
-    echo -e "${BLUE}🚀 Triggering initial news fetch...${NC}"
-    gcloud run jobs execute news-fetcher --region $GCP_REGION --wait || echo "Job execution started in background"
+    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
+    
+    # Create or update Cloud Run Job for seeding (using dedicated seed image)
+    if gcloud run jobs describe seed-languages-job --region $GCP_REGION &>/dev/null; then
+        echo -e "${BLUE}Updating existing seed job...${NC}"
+        gcloud run jobs update seed-languages-job \
+            --image ${REGISTRY}/${GCP_PROJECT_ID}/news-seed:latest \
+            --region $GCP_REGION \
+            --task-timeout 3m \
+            --max-retries 1 \
+            --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=INFO,REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},TRANSLATION_PROVIDER=mock,TTS_PROVIDER=mock"
+    else
+        echo -e "${BLUE}Creating seed job...${NC}"
+        gcloud run jobs create seed-languages-job \
+            --image ${REGISTRY}/${GCP_PROJECT_ID}/news-seed:latest \
+            --region $GCP_REGION \
+            --task-timeout 3m \
+            --max-retries 1 \
+            --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=INFO,REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},TRANSLATION_PROVIDER=mock,TTS_PROVIDER=mock"
+    fi
+    
+    echo -e "${BLUE}🚀 Executing seeding job...${NC}"
+    if gcloud run jobs execute seed-languages-job --region $GCP_REGION --wait; then
+        echo -e "${GREEN}✅ Language configuration seeded successfully${NC}"
+    else
+        echo -e "${RED}❌ Seeding job failed${NC}"
+        echo -e "${YELLOW}📋 Fetching recent logs...${NC}"
+        gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=seed-languages-job" \
+            --limit 50 \
+            --format="table(timestamp,textPayload)" \
+            --freshness=5m
+        echo ""
+        echo -e "${YELLOW}⚠️  You can manually run the seed job later with:${NC}"
+        echo "   gcloud run jobs execute seed-languages-job --region $GCP_REGION"
+        echo -e "${YELLOW}⚠️  Continuing with deployment...${NC}"
+    fi
     
     # Verify deployment
     echo ""
     echo -e "${BLUE}🔍 Verifying deployment...${NC}"
-    sleep 10
+    echo -e "${BLUE}⏳ Waiting for services to be ready (30s)...${NC}"
+    sleep 30
     
     if curl -f ${DEPLOYED_API_URL}/health &>/dev/null; then
         echo -e "${GREEN}✅ API is healthy${NC}"
     else
         echo -e "${RED}❌ API health check failed${NC}"
+        echo -e "${YELLOW}⚠️  This might be normal if services are still initializing${NC}"
+        echo -e "${YELLOW}⚠️  Check logs: gcloud logging read \"resource.type=cloud_run_revision AND resource.labels.service_name=news-api\" --limit 20${NC}"
     fi
     
     echo ""

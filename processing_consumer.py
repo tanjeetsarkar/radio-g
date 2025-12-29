@@ -1,6 +1,9 @@
 import logging
 from typing import Dict, List, Optional, Union
 from datetime import datetime
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
 
 from services.kafka_consumer import NewsKafkaConsumer
 from services.kafka_producer import NewsKafkaProducer
@@ -249,6 +252,30 @@ class NewsProcessingConsumer:
         logger.info("✓ Processing consumer shutdown complete")
 
 
+class HealthHandler(BaseHTTPRequestHandler):
+    """HTTP handler for Cloud Run health checks"""
+    def do_GET(self):
+        if self.path in ["/", "/health"]:
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"healthy","service":"news-processor"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass  # Suppress logs
+
+
+def start_health_server(port: int = 8080):
+    """Start health server in background thread"""
+    server = HTTPServer(("", port), HealthHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info(f"✓ Health server listening on port {port}")
+
+
 def main():
     import argparse
     config = get_config()
@@ -262,6 +289,10 @@ def main():
     )
     parser.add_argument("--tts-provider", default=config.api.tts_provider)
     args = parser.parse_args()
+
+    # Start health server for Cloud Run
+    port = int(os.getenv("PORT", "8080"))
+    start_health_server(port)
 
     # Determine correct Kafka config (String vs Dict)
     kafka_config = args.kafka
