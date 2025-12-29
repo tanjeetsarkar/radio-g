@@ -278,6 +278,9 @@ def start_health_server(port: int = 8080):
 
 def main():
     import argparse
+    import signal
+    import sys
+    
     config = get_config()
 
     parser = argparse.ArgumentParser(description="News Processing Consumer")
@@ -307,6 +310,15 @@ def main():
         tts_api_key=config.api.elevenlabs_api_key,
         output_dir=config.app.audio_output_dir,
     )
+
+    # Graceful shutdown handler
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        consumer.shutdown()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
     if args.mode == "batch":
         consumer.process_batch(max_messages=args.max)

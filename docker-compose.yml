@@ -1,9 +1,27 @@
+# ============================================
+# REDIS CONFIGURATION MODES
+# ============================================
+# This compose file supports two Redis configurations:
+#
+# 1. LOCAL DOCKER REDIS (Development):
+#    - Set REDIS_HOST=redis in .env
+#    - Start with: docker compose --profile local-redis up
+#    - Uses the redis container defined below
+#
+# 2. EXTERNAL REDIS (Production - GCP Memorystore, Redis Cloud, etc.):
+#    - Set REDIS_HOST=<your-external-redis-ip> in .env
+#    - Set REDIS_PASSWORD, REDIS_SSL as needed in .env
+#    - Start with: docker compose up (without local-redis profile)
+#    - Redis container will not start
+# ============================================
+
 services:
   # ============================================
   # Infrastructure Services
   # ============================================
   
   # Redis for deduplication and language config
+  # Only starts when using --profile local-redis flag
   redis:
     image: redis:7-alpine
     container_name: news_redis
@@ -19,6 +37,8 @@ services:
       retries: 3
     networks:
       - news_network
+    profiles:
+      - local-redis  # Only start when using local Redis
 
   # Zookeeper for Kafka
   zookeeper:
@@ -92,8 +112,6 @@ services:
       dockerfile: Dockerfile.fetcher
     container_name: news_fetcher
     depends_on:
-      redis:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     environment:
@@ -101,13 +119,15 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       
-      # Redis
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      # Redis (from .env - supports both local and external)
+      # Set REDIS_HOST=redis for local Docker, or external IP for deployed Redis
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_USERNAME: ${REDIS_USERNAME:-default}
-      REDIS_SSL: "false"
-      REDIS_DB: 0
-      REDIS_TTL_HOURS: 24
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SSL: ${REDIS_SSL:-false}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_TTL_HOURS: ${REDIS_TTL_HOURS:-24}
       
       # Kafka
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -132,8 +152,6 @@ services:
       dockerfile: Dockerfile.processor
     container_name: news_processor
     depends_on:
-      redis:
-        condition: service_healthy
       kafka:
         condition: service_healthy
       news-fetcher:
@@ -151,12 +169,14 @@ services:
       TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-gemini}
       TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
       
-      # Redis
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      # Redis (from .env - supports both local and external)
+      # Set REDIS_HOST=redis for local Docker, or external IP for deployed Redis
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_USERNAME: ${REDIS_USERNAME:-default}
-      REDIS_SSL: "false"
-      REDIS_DB: 0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SSL: ${REDIS_SSL:-false}
+      REDIS_DB: ${REDIS_DB:-0}
       
       # Kafka
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -183,8 +203,6 @@ services:
       dockerfile: Dockerfile.api
     container_name: news_api
     depends_on:
-      redis:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     ports:
@@ -198,12 +216,13 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
       
-      # Redis
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      # Set REDIS_HOST=redis for local Docker, or external IP for deployed Redis
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_USERNAME: ${REDIS_USERNAME:-default}
-      REDIS_SSL: "false"
-      REDIS_DB: 0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SSL: ${REDIS_SSL:-false}
+      REDIS_DB: ${REDIS_DB:-0}
       
       # Kafka
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092

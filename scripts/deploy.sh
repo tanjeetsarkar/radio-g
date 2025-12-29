@@ -132,10 +132,10 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
     
     
     # Seed language configuration using dedicated seed service
-    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
-    docker compose run --rm news-seed
+    # echo -e "${BLUE}💾 Seeding language configuration...${NC}"
+    # docker compose run --rm news-seed
     
-    echo -e "${GREEN}✅ Language configuration seeded${NC}"
+    # echo -e "${GREEN}✅ Language configuration seeded${NC}"
     
     # Start application services
     echo -e "${BLUE}🚀 Starting application services...${NC}"
@@ -294,7 +294,7 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     echo -e "${BLUE}🔨 Building and pushing Docker images...${NC}"
     
     REGISTRY="gcr.io"
-    IMAGES=("api" "fetcher" "processor" "seed")
+    IMAGES=("api" "fetcher" "processor")
     
     for image in "${IMAGES[@]}"; do
         IMAGE_NAME="news-${image}"
@@ -313,8 +313,14 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     # Build and push frontend
     echo -e "${BLUE}Building frontend...${NC}"
     
-    # Construct API URL
-    API_URL="https://news-api-${GCP_PROJECT_ID}.${GCP_REGION}.run.app"
+    # Use API URL from environment or construct default
+    if [ -z "$NEXT_PUBLIC_API_URL" ]; then
+        API_URL="https://news-api-${GCP_PROJECT_ID}.${GCP_REGION}.run.app"
+        echo -e "${YELLOW}⚠️  NEXT_PUBLIC_API_URL not set, using default: $API_URL${NC}"
+    else
+        API_URL="$NEXT_PUBLIC_API_URL"
+        echo -e "${GREEN}✅ Using NEXT_PUBLIC_API_URL from environment: $API_URL${NC}"
+    fi
     
     cd frontend
     docker build \
@@ -369,18 +375,18 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     # Create temporary env vars file to handle special characters in URLs
     # Added REDIS_USERNAME, PORT, PASSWORD, SSL
     cat > /tmp/api-env-vars.yaml <<EOF
-ENVIRONMENT: ${ENVIRONMENT}
-LOG_LEVEL: ${LOG_LEVEL}
-REDIS_HOST: ${REDIS_HOST_GCP}
-REDIS_PORT: ${REDIS_PORT:-6379}
-REDIS_PASSWORD: ${REDIS_PASSWORD}
-REDIS_USERNAME: ${REDIS_USERNAME:-default}
+ENVIRONMENT: "${ENVIRONMENT}"
+LOG_LEVEL: "${LOG_LEVEL}"
+REDIS_HOST: "${REDIS_HOST_GCP}"
+REDIS_PORT: "${REDIS_PORT:-6379}"
+REDIS_PASSWORD: "${REDIS_PASSWORD}"
+REDIS_USERNAME: "${REDIS_USERNAME:-default}"
 REDIS_SSL: "${REDIS_SSL:-false}"
-REDIS_DB: 0
-KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP}
-TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-gemini}
-TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
-ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+REDIS_DB: "0"
+KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP}"
+TRANSLATION_PROVIDER: "${TRANSLATION_PROVIDER:-gemini}"
+TTS_PROVIDER: "${TTS_PROVIDER:-elevenlabs}"
+ALLOWED_ORIGINS: "${ALLOWED_ORIGINS}"
 EOF
     
     # Build secrets string
@@ -395,6 +401,8 @@ EOF
         --region $GCP_REGION \
         --allow-unauthenticated \
         --port 8000 \
+        --timeout 300 \
+        --cpu-boost \
         --memory ${API_MEMORY:-1Gi} \
         --cpu ${API_CPU:-1} \
         --min-instances ${API_MIN_INSTANCES:-1} \
@@ -472,7 +480,7 @@ EOF
         --cpu ${FRONTEND_CPU:-1} \
         --min-instances ${FRONTEND_MIN_INSTANCES:-0} \
         --max-instances ${FRONTEND_MAX_INSTANCES:-5} \
-        --set-env-vars="NEXT_PUBLIC_API_URL=${DEPLOYED_API_URL}"
+        --set-env-vars="NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}"
     
     FRONTEND_URL=$(gcloud run services describe news-frontend --region $GCP_REGION --format 'value(status.url)')
     echo -e "${GREEN}✅ Frontend deployed: ${FRONTEND_URL}${NC}"
@@ -480,9 +488,30 @@ EOF
     # Auto-update CORS (New Feature)
     echo -e "${BLUE}🔄 Updating CORS configuration...${NC}"
     NEW_ALLOWED_ORIGINS="${ALLOWED_ORIGINS},${FRONTEND_URL}"
+    
+    # Create complete env vars file to update CORS without losing other vars
+    cat > /tmp/api-update-env-vars.yaml <<EOF
+ENVIRONMENT: "${ENVIRONMENT}"
+LOG_LEVEL: "${LOG_LEVEL}"
+REDIS_HOST: "${REDIS_HOST_GCP}"
+REDIS_PORT: "${REDIS_PORT:-6379}"
+REDIS_PASSWORD: "${REDIS_PASSWORD}"
+REDIS_USERNAME: "${REDIS_USERNAME:-default}"
+REDIS_SSL: "${REDIS_SSL:-false}"
+REDIS_DB: "0"
+KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP}"
+TRANSLATION_PROVIDER: "${TRANSLATION_PROVIDER:-gemini}"
+TTS_PROVIDER: "${TTS_PROVIDER:-elevenlabs}"
+ALLOWED_ORIGINS: "${NEW_ALLOWED_ORIGINS}"
+EOF
+    
     gcloud run services update news-api \
         --region $GCP_REGION \
-        --update-env-vars="ALLOWED_ORIGINS=${NEW_ALLOWED_ORIGINS}"
+        --env-vars-file=/tmp/api-update-env-vars.yaml
+    
+    # Clean up
+    rm /tmp/api-update-env-vars.yaml
+    
     echo -e "${GREEN}✅ CORS updated${NC}"
     
     # Verify deployment
@@ -491,13 +520,13 @@ EOF
     echo -e "${BLUE}⏳ Waiting for services to be ready (30s)...${NC}"
     sleep 30
     
-    if curl -f ${DEPLOYED_API_URL}/health &>/dev/null; then
-        echo -e "${GREEN}✅ API is healthy${NC}"
-    else
-        echo -e "${RED}❌ API health check failed${NC}"
-        echo -e "${YELLOW}⚠️  This might be normal if services are still initializing${NC}"
-        echo -e "${YELLOW}⚠️  Check logs: gcloud logging read \"resource.type=cloud_run_revision AND resource.labels.service_name=news-api\" --limit 20${NC}"
-    fi
+    # if curl -f ${DEPLOYED_API_URL}/health &>/dev/null; then
+    #     echo -e "${GREEN}✅ API is healthy${NC}"
+    # else
+    #     echo -e "${RED}❌ API health check failed${NC}"
+    #     echo -e "${YELLOW}⚠️  This might be normal if services are still initializing${NC}"
+    #     echo -e "${YELLOW}⚠️  Check logs: gcloud logging read \"resource.type=cloud_run_revision AND resource.labels.service_name=news-api\" --limit 20${NC}"
+    # fi
     
     echo ""
     echo -e "${GREEN}========================================${NC}"
