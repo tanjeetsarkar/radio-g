@@ -333,14 +333,19 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     echo ""
     echo -e "${BLUE}🚀 Deploying services to Cloud Run...${NC}"
     
-    # Get Redis host
-    REDIS_HOST_GCP=$(gcloud redis instances describe news-redis --region=$GCP_REGION --format="value(host)" 2>/dev/null || echo "")
-    
-    if [ -z "$REDIS_HOST_GCP" ]; then
-        echo -e "${YELLOW}⚠️  Using Redis host from env file: $REDIS_HOST${NC}"
+    # Get Redis host (Prioritize env file for Public Redis)
+    if [ -n "$REDIS_HOST" ]; then
+        echo -e "${GREEN}✅ Using Redis from environment: $REDIS_HOST${NC}"
         REDIS_HOST_GCP=$REDIS_HOST
     else
-        echo -e "${GREEN}✅ Found Redis instance: $REDIS_HOST_GCP${NC}"
+        # Fallback to GCP Memorystore lookup
+        REDIS_HOST_GCP=$(gcloud redis instances describe news-redis --region=$GCP_REGION --format="value(host)" 2>/dev/null || echo "")
+        if [ -n "$REDIS_HOST_GCP" ]; then
+             echo -e "${GREEN}✅ Found GCP Redis instance: $REDIS_HOST_GCP${NC}"
+        else
+             echo -e "${RED}❌ Redis Host not found in environment or GCP.${NC}"
+             exit 1
+        fi
     fi
     
     # Construct Kafka bootstrap servers
@@ -362,10 +367,16 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     echo -e "${BLUE}Deploying API service...${NC}"
     
     # Create temporary env vars file to handle special characters in URLs
+    # Added REDIS_USERNAME, PORT, PASSWORD, SSL
     cat > /tmp/api-env-vars.yaml <<EOF
 ENVIRONMENT: ${ENVIRONMENT}
 LOG_LEVEL: ${LOG_LEVEL}
 REDIS_HOST: ${REDIS_HOST_GCP}
+REDIS_PORT: ${REDIS_PORT:-6379}
+REDIS_PASSWORD: ${REDIS_PASSWORD}
+REDIS_USERNAME: ${REDIS_USERNAME:-default}
+REDIS_SSL: "${REDIS_SSL:-false}"
+REDIS_DB: 0
 KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP}
 TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-gemini}
 TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
@@ -396,6 +407,9 @@ EOF
     
     DEPLOYED_API_URL=$(gcloud run services describe news-api --region $GCP_REGION --format 'value(status.url)')
     echo -e "${GREEN}✅ API deployed: ${DEPLOYED_API_URL}${NC}"
+
+    # Prepare common env vars string for other services (including new Redis vars)
+    COMMON_ENV_VARS="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},REDIS_PORT=${REDIS_PORT:-6379},REDIS_PASSWORD=${REDIS_PASSWORD},REDIS_USERNAME=${REDIS_USERNAME:-default},REDIS_SSL=${REDIS_SSL:-false},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP}"
     
     # Deploy Processor Service
     echo -e "${BLUE}Deploying processor service...${NC}"
@@ -417,7 +431,7 @@ EOF
         --cpu ${PROCESSOR_CPU:-2} \
         --min-instances ${PROCESSOR_MIN_INSTANCES:-1} \
         --max-instances ${PROCESSOR_MAX_INSTANCES:-10} \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs}" \
+        --set-env-vars="${COMMON_ENV_VARS},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs}" \
         --set-secrets="${PROCESSOR_SECRETS}"
     
     echo -e "${GREEN}✅ Processor deployed${NC}"
@@ -442,7 +456,7 @@ EOF
         --cpu ${FETCHER_CPU:-1} \
         --min-instances ${FETCHER_MIN_INSTANCES:-1} \
         --max-instances ${FETCHER_MAX_INSTANCES:-3} \
-        --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=${LOG_LEVEL},REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP}" \
+        --set-env-vars="${COMMON_ENV_VARS}" \
         --set-secrets="${FETCHER_SECRETS}"
     
     echo -e "${GREEN}✅ Fetcher deployed${NC}"
@@ -462,45 +476,14 @@ EOF
     
     FRONTEND_URL=$(gcloud run services describe news-frontend --region $GCP_REGION --format 'value(status.url)')
     echo -e "${GREEN}✅ Frontend deployed: ${FRONTEND_URL}${NC}"
-    
-    # Seed language configuration
-    echo ""
-    echo -e "${BLUE}💾 Seeding language configuration...${NC}"
-    
-    # Create or update Cloud Run Job for seeding (using dedicated seed image)
-    if gcloud run jobs describe seed-languages-job --region $GCP_REGION &>/dev/null; then
-        echo -e "${BLUE}Updating existing seed job...${NC}"
-        gcloud run jobs update seed-languages-job \
-            --image ${REGISTRY}/${GCP_PROJECT_ID}/news-seed:latest \
-            --region $GCP_REGION \
-            --task-timeout 3m \
-            --max-retries 1 \
-            --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=INFO,REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},TRANSLATION_PROVIDER=mock,TTS_PROVIDER=mock"
-    else
-        echo -e "${BLUE}Creating seed job...${NC}"
-        gcloud run jobs create seed-languages-job \
-            --image ${REGISTRY}/${GCP_PROJECT_ID}/news-seed:latest \
-            --region $GCP_REGION \
-            --task-timeout 3m \
-            --max-retries 1 \
-            --set-env-vars="ENVIRONMENT=${ENVIRONMENT},LOG_LEVEL=INFO,REDIS_HOST=${REDIS_HOST_GCP},KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP},TRANSLATION_PROVIDER=mock,TTS_PROVIDER=mock"
-    fi
-    
-    echo -e "${BLUE}🚀 Executing seeding job...${NC}"
-    if gcloud run jobs execute seed-languages-job --region $GCP_REGION --wait; then
-        echo -e "${GREEN}✅ Language configuration seeded successfully${NC}"
-    else
-        echo -e "${RED}❌ Seeding job failed${NC}"
-        echo -e "${YELLOW}📋 Fetching recent logs...${NC}"
-        gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=seed-languages-job" \
-            --limit 50 \
-            --format="table(timestamp,textPayload)" \
-            --freshness=5m
-        echo ""
-        echo -e "${YELLOW}⚠️  You can manually run the seed job later with:${NC}"
-        echo "   gcloud run jobs execute seed-languages-job --region $GCP_REGION"
-        echo -e "${YELLOW}⚠️  Continuing with deployment...${NC}"
-    fi
+
+    # Auto-update CORS (New Feature)
+    echo -e "${BLUE}🔄 Updating CORS configuration...${NC}"
+    NEW_ALLOWED_ORIGINS="${ALLOWED_ORIGINS},${FRONTEND_URL}"
+    gcloud run services update news-api \
+        --region $GCP_REGION \
+        --update-env-vars="ALLOWED_ORIGINS=${NEW_ALLOWED_ORIGINS}"
+    echo -e "${GREEN}✅ CORS updated${NC}"
     
     # Verify deployment
     echo ""
@@ -530,6 +513,8 @@ EOF
     echo "  • View logs:     gcloud logging read \"resource.type=cloud_run_revision\" --limit 50"
     echo "  • List services: gcloud run services list --region ${GCP_REGION}"
     echo "  • Scale:         gcloud run services update news-processor --min-instances 2 --region ${GCP_REGION}"
+    echo ""
+    echo -e "${YELLOW}⚠️  Remember to seed languages locally: uv run python scripts/seed_languages.py${NC}"
     echo ""
     
 else

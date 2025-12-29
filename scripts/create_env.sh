@@ -75,28 +75,40 @@ if [ "$TARGET" = "gcp" ]; then
     fi
     
     echo ""
-    echo "5. Redis Host (from GCP Memorystore)"
+    echo "5. Redis Host"
     read -p "   Enter Redis host: " REDIS_HOST
     if [ -n "$REDIS_HOST" ]; then
         sed -i "s|REDIS_HOST=your-redis-host-from-gcp|REDIS_HOST=${REDIS_HOST}|g" $ENV_FILE
     fi
+
+    echo ""
+    echo "6. Redis Username (Default: default)"
+    read -p "   Enter Redis username: " REDIS_USER
+    if [ -n "$REDIS_USER" ]; then
+        # If env file doesn't have the var, append it, else replace
+        if grep -q "REDIS_USERNAME=" $ENV_FILE; then
+             sed -i "s|REDIS_USERNAME=.*|REDIS_USERNAME=${REDIS_USER}|g" $ENV_FILE
+        else
+             echo "REDIS_USERNAME=${REDIS_USER}" >> $ENV_FILE
+        fi
+    fi
     
     echo ""
-    echo "6. Kafka Bootstrap Servers (from Confluent Cloud)"
+    echo "7. Kafka Bootstrap Servers (from Confluent Cloud)"
     read -p "   Enter bootstrap servers: " KAFKA_SERVERS
     if [ -n "$KAFKA_SERVERS" ]; then
         sed -i "s|KAFKA_BOOTSTRAP_SERVERS=pkc-xxx.region.provider.confluent.cloud:9092|KAFKA_BOOTSTRAP_SERVERS=${KAFKA_SERVERS}|g" $ENV_FILE
     fi
     
     echo ""
-    echo "7. Kafka API Key (from Confluent Cloud)"
+    echo "8. Kafka API Key (from Confluent Cloud)"
     read -p "   Enter API key: " KAFKA_KEY
     if [ -n "$KAFKA_KEY" ]; then
         sed -i "s|KAFKA_API_KEY=your_kafka_api_key|KAFKA_API_KEY=${KAFKA_KEY}|g" $ENV_FILE
     fi
     
     echo ""
-    echo "8. Kafka API Secret (from Confluent Cloud)"
+    echo "9. Kafka API Secret (from Confluent Cloud)"
     read -p "   Enter API secret: " KAFKA_SECRET
     if [ -n "$KAFKA_SECRET" ]; then
         sed -i "s|KAFKA_API_SECRET=your_kafka_api_secret|KAFKA_API_SECRET=${KAFKA_SECRET}|g" $ENV_FILE
@@ -112,7 +124,7 @@ if [ "$TARGET" = "local" ]; then
     echo "  2. Run: ./scripts/deploy.sh $ENV_FILE"
 else
     echo "  1. Review and edit $ENV_FILE if needed"
-    echo "  2. Ensure GCP infrastructure is set up (see DEPLOYMENT_UNIFIED.md)"
+    echo "  2. Ensure GCP infrastructure is set up"
     echo "  3. Run: ./scripts/deploy.sh $ENV_FILE"
 fi
 echo ""

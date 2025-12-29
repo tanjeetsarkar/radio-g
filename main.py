@@ -212,6 +212,7 @@ async def startup_event():
             'host': config.redis.host,
             'port': config.redis.port,
             'db': config.redis.db,
+            'username': config.redis.username,  # <--- ADDED
             'decode_responses': True,
         }
         

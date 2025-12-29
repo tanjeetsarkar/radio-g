@@ -1,4 +1,3 @@
-
 import os
 from typing import Optional
 from dataclasses import dataclass
@@ -41,6 +40,7 @@ class RedisConfig:
     port: int = 6379
     db: int = 0
     password: Optional[str] = None
+    username: str = "default"  # <--- ADDED
     ssl: bool = False
     ttl_hours: int = 24
 
@@ -126,6 +126,7 @@ class Config:
             port=int(os.getenv("REDIS_PORT", "6379")),
             db=int(os.getenv("REDIS_DB", "0")),
             password=redis_password,
+            username=os.getenv("REDIS_USERNAME", "default"),  # <--- ADDED
             ssl=os.getenv("REDIS_SSL", "false").lower() == "true",
             ttl_hours=int(os.getenv("REDIS_TTL_HOURS", "24"))
         )
@@ -182,6 +183,6 @@ if __name__ == "__main__":
     config = get_config()
     print(f"Environment: {config.environment}")
     print(f"Kafka: {config.kafka.bootstrap_servers}")
-    print(f"Redis: {config.redis.host}:{config.redis.port}")
+    print(f"Redis: {config.redis.username}@{config.redis.host}:{config.redis.port}")
     print(f"Translation Provider: {config.api.translation_provider}")
     print(f"TTS Provider: {config.api.tts_provider}")

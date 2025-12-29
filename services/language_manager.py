@@ -26,6 +26,7 @@ class LanguageManager:
             'host': config.redis.host,
             'port': config.redis.port,
             'db': config.redis.db,
+            'username': config.redis.username,  # <--- ADDED
             'decode_responses': True,
             'socket_connect_timeout': 10,  # Connection timeout
             'socket_timeout': 10,  # Operation timeout
