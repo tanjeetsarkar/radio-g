@@ -103,7 +103,7 @@ def initialize_kafka_consumers():
 
     try:
         kafka_consumer = NewsKafkaConsumer(
-            bootstrap_servers=config.kafka.bootstrap_servers,
+            bootstrap_servers=config.kafka.connection_config,
             group_id=unique_group_id,
             auto_offset_reset="earliest",  # Start from beginning to build cache
             manage_signals=False,
