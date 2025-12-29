@@ -954,7 +954,7 @@ curl ${API_URL}/health
 open $FRONTEND_URL
 
 # Verify API connection
-curl ${FRONTEND_URL}/api/health
+curl ${FRONTEND_URL}/health
 ```
 
 ---

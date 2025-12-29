@@ -35,7 +35,16 @@ class NewsFetcher:
         self.deduplicator = None
         if use_deduplication:
             try:
-                self.deduplicator = NewsDeduplicator()
+                from config.config import get_config
+                config = get_config()
+                self.deduplicator = NewsDeduplicator(
+                    redis_host=config.redis.host,
+                    redis_port=config.redis.port,
+                    redis_db=config.redis.db,
+                    redis_password=config.redis.password,
+                    redis_ssl=config.redis.ssl,
+                    ttl_hours=config.redis.ttl_hours
+                )
                 logger.info("✓ Deduplication enabled")
             except Exception as e:
                 logger.warning(f"Deduplication disabled due to error: {e}")

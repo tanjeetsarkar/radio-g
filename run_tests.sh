@@ -50,7 +50,7 @@ check_docker_services() {
     
     if ! docker ps | grep -q "news_redis"; then
         echo -e "${YELLOW}⚠ Redis is not running${NC}"
-        echo "Start with: docker-compose up -d redis"
+        echo "Start with: docker compose up -d redis"
         echo ""
     else
         echo -e "${GREEN}✓ Redis is running${NC}"
@@ -58,7 +58,7 @@ check_docker_services() {
     
     if ! docker ps | grep -q "news_kafka"; then
         echo -e "${YELLOW}⚠ Kafka is not running${NC}"
-        echo "Start with: docker-compose up -d"
+        echo "Start with: docker compose up -d"
         echo ""
     else
         echo -e "${GREEN}✓ Kafka is running${NC}"

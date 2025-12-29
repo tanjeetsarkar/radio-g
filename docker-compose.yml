@@ -1,5 +1,9 @@
 services:
-  # Redis for deduplication
+  # ============================================
+  # Infrastructure Services
+  # ============================================
+  
+  # Redis for deduplication and language config
   redis:
     image: redis:7-alpine
     container_name: news_redis
@@ -27,13 +31,19 @@ services:
       - "2181:2181"
     networks:
       - news_network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # Kafka broker
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: news_kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
       - "9093:9093"
@@ -46,6 +56,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s
@@ -54,12 +65,13 @@ services:
     networks:
       - news_network
 
-  # Kafka UI (optional - for monitoring)
+  # Kafka UI for monitoring (optional but helpful)
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: news_kafka_ui
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -69,24 +81,170 @@ services:
     networks:
       - news_network
 
-  # News Fetcher Service (we'll add this next)
-  # news-fetcher:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: news_fetcher
-  #   depends_on:
-  #     - redis
-  #     - kafka
-  #   environment:
-  #     REDIS_HOST: redis
-  #     REDIS_PORT: 6379
-  #     KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-  #   networks:
-  #     - news_network
+  # ============================================
+  # Application Services
+  # ============================================
+
+  # News Fetcher Service
+  news-fetcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.fetcher
+    container_name: news_fetcher
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_SSL: "false"
+      REDIS_DB: 0
+      REDIS_TTL_HOURS: 24
+      
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      
+      # Fetcher settings
+      FETCH_INTERVAL_MINUTES: ${FETCH_INTERVAL_MINUTES:-15}
+      ENABLE_DEDUPLICATION: "true"
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    networks:
+      - news_network
+
+  # Processing Consumer Service
+  news-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.processor
+    container_name: news_processor
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      news-fetcher:
+        condition: service_started
+    environment:
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # API Keys
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      
+      # Service Providers
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-gemini}
+      TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_SSL: "false"
+      REDIS_DB: 0
+      
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      
+      # Processing settings
+      MAX_WORKERS: ${MAX_WORKERS:-4}
+      AUDIO_OUTPUT_DIR: /app/audio_output
+    volumes:
+      - ./audio_output:/app/audio_output
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    networks:
+      - news_network
+    # Scale this service: docker compose up -d --scale news-processor=3
+
+  # FastAPI Backend Service
+  news-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: news_api
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # API Keys (for health checks)
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_SSL: "false"
+      REDIS_DB: 0
+      
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      
+      # API settings
+      PORT: 8000
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
+    volumes:
+      - ./audio_output:/app/audio_output:ro
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - news_network
+
+  # Next.js Frontend
+  news-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: news_frontend
+    depends_on:
+      news-api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - news_network
 
 volumes:
   redis_data:
+    driver: local
 
 networks:
   news_network:

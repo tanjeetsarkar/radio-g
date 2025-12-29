@@ -51,13 +51,13 @@ uv add --dev pytest pytest-cov pytest-asyncio pytest-mock pytest-timeout
 
 ```bash
 # Start Redis and Kafka
-docker-compose up -d
+docker compose up -d
 
 # Verify services
-docker-compose ps
+docker compose ps
 
 # Wait for Kafka to be ready (~30 seconds)
-docker-compose logs kafka | grep "started"
+docker compose logs kafka | grep "started"
 ```
 
 ### 3. Run Tests
@@ -516,13 +516,13 @@ uv pip show pytest
 
 ```bash
 # Check if Redis is running
-docker-compose ps redis
+docker compose ps redis
 
 # Start Redis
-docker-compose up -d redis
+docker compose up -d redis
 
 # Check logs
-docker-compose logs redis
+docker compose logs redis
 
 # Test connection manually
 docker exec -it news_redis redis-cli ping
@@ -532,17 +532,17 @@ docker exec -it news_redis redis-cli ping
 
 ```bash
 # Check if Kafka is running
-docker-compose ps kafka
+docker compose ps kafka
 
 # Kafka takes ~30 seconds to start
-docker-compose logs -f kafka | grep "started"
+docker compose logs -f kafka | grep "started"
 
 # Restart Kafka
-docker-compose restart kafka zookeeper
+docker compose restart kafka zookeeper
 
 # Clear Kafka data (if corrupted)
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 ```
 
 ### Tests Hanging
@@ -573,7 +573,7 @@ lsof -i :9093  # Kafka
 kill -9 <PID>
 
 # Or stop Docker services
-docker-compose down
+docker compose down
 ```
 
 ### Import Errors
@@ -703,7 +703,7 @@ test:
 
 1. Check the logs: `tail -f logs/*.log`
 2. Run with verbose output: `uv run pytest -vv -s`
-3. Check Docker services: `docker-compose ps`
+3. Check Docker services: `docker compose ps`
 4. View coverage report: `open htmlcov/index.html`
 5. Review test fixtures: `uv run pytest --fixtures`
 6. Debug with pdb: `uv run pytest --pdb`

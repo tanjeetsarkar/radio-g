@@ -116,11 +116,16 @@ class Config:
     
     def _load_redis_config(self) -> RedisConfig:
         """Load Redis configuration"""
+        # Get password, convert empty string to None
+        redis_password = os.getenv("REDIS_PASSWORD", "")
+        if not redis_password or redis_password.strip() == "":
+            redis_password = None
+        
         return RedisConfig(
             host=os.getenv("REDIS_HOST", "localhost"),
             port=int(os.getenv("REDIS_PORT", "6379")),
             db=int(os.getenv("REDIS_DB", "0")),
-            password=os.getenv("REDIS_PASSWORD"),
+            password=redis_password,
             ssl=os.getenv("REDIS_SSL", "false").lower() == "true",
             ttl_hours=int(os.getenv("REDIS_TTL_HOURS", "24"))
         )

@@ -1,6 +1,6 @@
 import redis
 import logging
-from typing import List
+from typing import List, Optional
 from models.news_item import NewsItem
 import hashlib
 import json
@@ -19,6 +19,8 @@ class NewsDeduplicator:
         redis_host: str = "localhost",
         redis_port: int = 6379,
         redis_db: int = 0,
+        redis_password: Optional[str] = None,
+        redis_ssl: bool = False,
         ttl_hours: int = 24
     ):
         """
@@ -28,16 +30,29 @@ class NewsDeduplicator:
             redis_host: Redis server host
             redis_port: Redis server port
             redis_db: Redis database number
+            redis_password: Redis password (optional)
+            redis_ssl: Use SSL connection (optional)
             ttl_hours: Time-to-live for cached articles in hours
         """
-        self.redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5
-        )
+        # Only include password and SSL if provided
+        redis_params = {
+            'host': redis_host,
+            'port': redis_port,
+            'db': redis_db,
+            'decode_responses': True,
+            'socket_connect_timeout': 5,
+            'socket_timeout': 5
+        }
+        
+        # Only add password if it's not None and not empty
+        if redis_password:
+            redis_params['password'] = redis_password
+        
+        # Only add SSL if True
+        if redis_ssl:
+            redis_params['ssl'] = redis_ssl
+        
+        self.redis_client = redis.Redis(**redis_params)
         self.ttl_seconds = ttl_hours * 3600
         self.key_prefix = "news:seen:"
         
@@ -165,7 +180,7 @@ class NewsDeduplicator:
             logger.error(f"Redis error clearing cache: {e}")
             return False
     
-    def get_article_info(self, news_item: NewsItem) -> dict:
+    def get_article_info(self, news_item: NewsItem) -> Optional[dict]:
         """Get cached metadata for an article (for debugging)"""
         article_hash = self._generate_hash(news_item)
         key = f"{self.key_prefix}{article_hash}"

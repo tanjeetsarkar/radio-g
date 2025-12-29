@@ -75,7 +75,7 @@ uv --version  # Should show: uv x.x.x
 https://www.docker.com/products/docker-desktop
 
 # Ubuntu/Debian
-sudo apt install docker.io docker-compose
+sudo apt install docker.io docker compose
 
 # Start Docker
 sudo systemctl start docker  # Linux
@@ -83,7 +83,7 @@ sudo systemctl start docker  # Linux
 
 # Verify
 docker --version
-docker-compose --version
+docker compose --version
 ```
 
 #### 4. Node.js 20+ (for frontend)
@@ -130,7 +130,7 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 uv sync
 
 # 4. Start infrastructure
-docker-compose up -d
+docker compose up -d
 
 # 5. Configure environment
 cp .env.example .env
@@ -177,7 +177,7 @@ cd multilingual-news-radio
 
 # Verify you're in the right directory
 ls -la
-# Should see: config/, services/, frontend/, docker-compose.yml, etc.
+# Should see: config/, services/, frontend/, docker compose.yml, etc.
 ```
 
 ### Step 2: Python Environment Setup with uv
@@ -272,7 +272,7 @@ uv run python -c "import fastapi; print(fastapi.__version__)"
 
 ```bash
 # Start all services in background
-docker-compose up -d
+docker compose up -d
 
 # Services started:
 # - Redis (port 6379)
@@ -281,18 +281,18 @@ docker-compose up -d
 # - Kafka UI (port 8080)
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # View specific service logs
-docker-compose logs -f kafka
-docker-compose logs -f redis
+docker compose logs -f kafka
+docker compose logs -f redis
 ```
 
 #### Verify Services
 
 ```bash
 # Check all services are running
-docker-compose ps
+docker compose ps
 
 # Expected output:
 # NAME              IMAGE                   STATUS
@@ -306,7 +306,7 @@ docker exec -it news_redis redis-cli ping
 # Expected: PONG
 
 # Wait for Kafka to be ready (~30 seconds)
-docker-compose logs kafka | grep "started"
+docker compose logs kafka | grep "started"
 # Should see: [KafkaServer id=1] started
 
 # Open Kafka UI (optional)
@@ -328,11 +328,11 @@ lsof -i :9093  # Kafka
 lsof -i :8080  # Kafka UI
 
 # 3. Restart services
-docker-compose restart
+docker compose restart
 
 # 4. Reset everything (nuclear option)
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 ```
 
 ### Step 4: Environment Configuration
@@ -848,15 +848,15 @@ lsof -i :9093  # Check Kafka
 kill -9 <PID>  # Kill conflicting process
 
 # Services not starting
-docker-compose down -v  # Remove volumes
-docker-compose up -d
+docker compose down -v  # Remove volumes
+docker compose up -d
 
 # View detailed logs
-docker-compose logs --tail=100 -f kafka
+docker compose logs --tail=100 -f kafka
 
 # Container keeps restarting
-docker-compose ps
-docker-compose logs <service-name>
+docker compose ps
+docker compose logs <service-name>
 
 # Out of disk space
 docker system prune -a  # Clean up
@@ -912,10 +912,10 @@ docker exec -it news_redis redis-cli ping
 # Should return: PONG
 
 # Check Redis logs
-docker-compose logs redis
+docker compose logs redis
 
 # Restart Redis
-docker-compose restart redis
+docker compose restart redis
 
 # Connect manually
 docker exec -it news_redis redis-cli
@@ -926,7 +926,7 @@ docker exec -it news_redis redis-cli
 
 ```bash
 # Kafka not ready (wait 30 seconds)
-docker-compose logs kafka | grep "started"
+docker compose logs kafka | grep "started"
 
 # Check Kafka UI
 open http://localhost:8080
@@ -941,8 +941,8 @@ docker exec -it news_kafka kafka-topics \
   --describe --topic raw-news-feed
 
 # Reset Kafka
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 # Wait 30 seconds for startup
 ```
 
@@ -954,7 +954,7 @@ docker-compose up -d
 
 ```bash
 # Stop services
-docker-compose down
+docker compose down
 
 # Deactivate virtual environment
 deactivate
@@ -970,7 +970,7 @@ rm -rf audio_output/*
 
 ```bash
 # Stop and remove Docker containers
-docker-compose down -v
+docker compose down -v
 
 # Remove Docker images (optional)
 docker system prune -a
@@ -989,7 +989,7 @@ source .venv/bin/activate
 uv sync
 
 # Restart Docker
-docker-compose up -d
+docker compose up -d
 ```
 
 ---

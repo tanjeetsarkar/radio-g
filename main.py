@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Add parent directory to path for imports
 from services.kafka_consumer import NewsKafkaConsumer
-from processing_consumer import ProcessedNewsItem
+from models.news_item import ProcessedNewsItem
 from services.language_manager import get_language_manager
 from config.config import get_config
 from config.logging_config import setup_logging, get_logger
@@ -207,14 +207,23 @@ async def startup_event():
     try:
         initialize_kafka_consumers()
 
-        redis_client = redis.Redis(
-            host=config.redis.host,
-            port=config.redis.port,
-            db=config.redis.db,
-            password=config.redis.password,
-            ssl=config.redis.ssl,
-            decode_responses=True,
-        )
+        # Build Redis connection params
+        redis_params = {
+            'host': config.redis.host,
+            'port': config.redis.port,
+            'db': config.redis.db,
+            'decode_responses': True,
+        }
+        
+        # Only add password if it's not None and not empty
+        if config.redis.password:
+            redis_params['password'] = config.redis.password
+        
+        # Only add SSL if True
+        if config.redis.ssl:
+            redis_params['ssl'] = config.redis.ssl
+        
+        redis_client = redis.Redis(**redis_params)
 
         # Initialize health checker
         global health_checker

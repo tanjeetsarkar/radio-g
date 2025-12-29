@@ -1,7 +1,5 @@
 import logging
-import json
 from typing import Dict, List, Optional, Union
-from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from services.kafka_consumer import NewsKafkaConsumer
@@ -9,37 +7,12 @@ from services.kafka_producer import NewsKafkaProducer
 from services.translation_service import TranslationService
 from services.tts_service import TTSService
 from services.language_manager import get_language_manager
-from models.news_item import NewsItem
+from models.news_item import NewsItem, ProcessedNewsItem
 from models.dlq_event import DLQEvent
 from config.config import get_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-@dataclass
-class ProcessedNewsItem:
-    original_id: Optional[str]
-    original_title: str
-    original_url: str
-    category: str
-    source: str
-    published_date: str
-    language: str
-    summary: str
-    translated_summary: str
-    audio_file: str
-    audio_duration: float
-    processed_at: str
-    processing_provider: str
-    tts_provider: str
-
-    def to_json(self) -> str:
-        return json.dumps(asdict(self))
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "ProcessedNewsItem":
-        """Create from dictionary"""
-        return cls(**data)
 
 
 class NewsProcessingConsumer:

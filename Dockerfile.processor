@@ -1,0 +1,39 @@
+# ============================================
+# Dockerfile for Processing Consumer Service
+# ============================================
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast package management
+RUN pip install --no-cache-dir uv
+
+# Copy dependency files
+COPY pyproject.toml ./
+
+# Install dependencies using uv
+RUN uv sync
+
+# Copy application code
+COPY config/ ./config/
+COPY models/ ./models/
+COPY services/ ./services/
+COPY utils/ ./utils/
+COPY processing_consumer.py ./
+
+# Create directories
+RUN mkdir -p logs audio_output
+
+# Health check (check if process is running)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=40s --retries=3 \
+    CMD pgrep -f processing_consumer.py || exit 1
+
+# Run the processor
+CMD ["uv", "run", "processing_consumer.py", "--mode", "continuous"]

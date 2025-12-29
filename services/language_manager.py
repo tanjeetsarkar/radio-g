@@ -20,14 +20,25 @@ class LanguageManager:
 
     def _initialize(self):
         config = get_config()
-        self.redis = redis.Redis(
-            host=config.redis.host,
-            port=config.redis.port,
-            db=config.redis.db,
-            password=config.redis.password,
-            ssl=config.redis.ssl,
-            decode_responses=True
-        )
+        
+        # Build Redis connection params
+        redis_params = {
+            'host': config.redis.host,
+            'port': config.redis.port,
+            'db': config.redis.db,
+            'decode_responses': True
+        }
+        
+        # Only add password if it's not None and not empty
+        if config.redis.password:
+            redis_params['password'] = config.redis.password
+        
+        # Only add SSL if True
+        if config.redis.ssl:
+            redis_params['ssl'] = config.redis.ssl
+        
+        self.redis = redis.Redis(**redis_params)
+        
         # Local cache to prevent hammering Redis (TTL: 60s strategy implemented in logic)
         self._cache = None
         self._last_update = 0

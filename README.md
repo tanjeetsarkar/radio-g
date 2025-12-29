@@ -190,10 +190,10 @@ REDIS_PORT=6379
 
 ```bash
 # Start Redis, Kafka, Zookeeper
-docker-compose up -d
+docker compose up -d
 
 # Verify services are running
-docker-compose ps
+docker compose ps
 
 # Expected output:
 # NAME              STATUS
@@ -203,7 +203,7 @@ docker-compose ps
 # news_kafka_ui     Up
 
 # Check Kafka is ready (~30 seconds to start)
-docker-compose logs kafka | grep "started"
+docker compose logs kafka | grep "started"
 ```
 
 ### 5️⃣ Seed Language Configuration
@@ -632,18 +632,18 @@ uv sync
 docker info
 
 # Check service status
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs kafka
-docker-compose logs redis
+docker compose logs kafka
+docker compose logs redis
 
 # Restart specific service
-docker-compose restart kafka
+docker compose restart kafka
 
 # Reset everything
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 ```
 
 ### Port Conflicts
@@ -658,7 +658,7 @@ lsof -i :3000  # Frontend
 # Kill process
 kill -9 <PID>
 
-# Or change ports in docker-compose.yml
+# Or change ports in docker compose.yml
 ```
 
 ### API Key Issues
@@ -683,14 +683,14 @@ uv run python test_voice.py
 ```bash
 # Kafka takes ~30 seconds to start
 # Check if fully started:
-docker-compose logs kafka | grep "started"
+docker compose logs kafka | grep "started"
 
 # If stuck, restart with fresh state
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 
 # Wait 30 seconds, then verify
-docker-compose logs -f kafka
+docker compose logs -f kafka
 ```
 
 ### Import Errors
@@ -716,7 +716,7 @@ find . -type f -name "*.pyc" -delete
 
 ```bash
 # Stop Docker services
-docker-compose down
+docker compose down
 
 # Clear logs
 rm -rf logs/*
@@ -730,7 +730,7 @@ rm -rf test_audio_output/*
 
 ```bash
 # Stop and remove all Docker containers
-docker-compose down -v
+docker compose down -v
 
 # Remove Docker images
 docker system prune -a
@@ -783,7 +783,7 @@ radio-g/
 ├── news_pipeline.py           # News fetching pipeline
 ├── processing_consumer.py     # Translation/TTS consumer
 ├── main.py                    # FastAPI application
-├── docker-compose.yml         # Local infrastructure
+├── docker compose.yml         # Local infrastructure
 ├── pyproject.toml             # Python project config
 ├── requirements.txt           # Python dependencies
 └── .env.example               # Environment template

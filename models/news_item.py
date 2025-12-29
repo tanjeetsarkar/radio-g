@@ -51,3 +51,29 @@ class NewsItem:
     
     def __repr__(self) -> str:
         return f"NewsItem(id={self.id}, title={self.title[:50]}..., source={self.source})"
+
+
+@dataclass
+class ProcessedNewsItem:
+    original_id: Optional[str]
+    original_title: str
+    original_url: str
+    category: str
+    source: str
+    published_date: str
+    language: str
+    summary: str
+    translated_summary: str
+    audio_file: str
+    audio_duration: float
+    processed_at: str
+    processing_provider: str
+    tts_provider: str
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self))
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ProcessedNewsItem":
+        """Create from dictionary"""
+        return cls(**data)
