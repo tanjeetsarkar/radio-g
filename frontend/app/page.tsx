@@ -206,7 +206,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center text-sm text-blue-200/60">
-          <p>AI Partner Catalyst Hackathon 2024</p>
+          <p>Made with ❤️ for Everyone</p>
           <p className="mt-1">Powered by Confluent, Gemini & ElevenLabs</p>
         </div>
       </footer>

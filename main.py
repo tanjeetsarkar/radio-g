@@ -1,5 +1,6 @@
 import redis
 import uuid
+import asyncio
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +81,12 @@ class HealthResponse(BaseModel):
 # Dynamic in-memory cache: { "en": [items], "es": [items] }
 news_cache: Dict[str, List[ProcessedNewsItem]] = defaultdict(list)
 
+# Thread-safe lock for cache operations
+cache_lock = asyncio.Lock()
+
+# Background task reference for graceful shutdown
+background_task: Optional[asyncio.Task] = None
+
 # Single Kafka consumer for all languages (using regex subscription)
 kafka_consumer: Optional[NewsKafkaConsumer] = None
 
@@ -121,10 +128,11 @@ def initialize_kafka_consumers():
         logger.error(f"Failed to initialize consumer: {e}", exc_info=True)
 
 
-def update_cache(max_messages: int = 50):
+async def update_cache(max_messages: int = 50):
     """
     Consume a batch of messages from any language topic and update the cache.
     This runs blindly on the single consumer stream.
+    Thread-safe with asyncio.Lock.
     """
     if not kafka_consumer:
         logger.warning("Kafka consumer not initialized")
@@ -135,8 +143,10 @@ def update_cache(max_messages: int = 50):
     # Consume a batch of messages
     for _ in range(max_messages):
         try:
-            # Poll with short timeout
-            msg = kafka_consumer.consumer.poll(5.0)
+            # Poll with short timeout (run in executor to not block event loop)
+            msg = await asyncio.get_event_loop().run_in_executor(
+                None, kafka_consumer.consumer.poll, 0.1
+            )
 
             if msg is None:
                 break
@@ -151,21 +161,20 @@ def update_cache(max_messages: int = 50):
             # Convert to object
             item = ProcessedNewsItem.from_dict(data)
 
-            # Add to appropriate language bucket
-            # We rely on the 'language' field in the message
+            # Add to appropriate language bucket with lock
             lang_code = item.language
 
-            # Deduplicate by ID in the list (simple check)
-            # In a high-perf scenario, use a dict or set for checking existence
-            existing_ids = {x.original_id for x in news_cache[lang_code]}
+            async with cache_lock:
+                # Deduplicate by ID
+                existing_ids = {x.original_id for x in news_cache[lang_code]}
 
-            if item.original_id not in existing_ids:
-                news_cache[lang_code].append(item)
-                # Sort by date descending
-                news_cache[lang_code].sort(key=lambda x: x.published_date, reverse=True)
-                # Keep only latest 50
-                news_cache[lang_code] = news_cache[lang_code][:50]
-                messages_processed += 1
+                if item.original_id not in existing_ids:
+                    news_cache[lang_code].append(item)
+                    # Sort by date descending
+                    news_cache[lang_code].sort(key=lambda x: x.published_date, reverse=True)
+                    # Keep only latest 50
+                    news_cache[lang_code] = news_cache[lang_code][:50]
+                    messages_processed += 1
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
@@ -234,7 +243,12 @@ async def startup_event():
 
         # Initial cache warm-up (try to fetch existing history)
         logger.info("Warming up cache...")
-        update_cache(max_messages=200)
+        await update_cache(max_messages=200)
+
+        # Start background polling task
+        global background_task
+        background_task = asyncio.create_task(background_cache_updater())
+        logger.info("✓ Background cache updater started (30s interval)")
 
         logger.info("✓ API ready")
     except Exception as e:
@@ -242,12 +256,45 @@ async def startup_event():
         raise
 
 
+async def background_cache_updater():
+    """Background task to continuously update cache from Kafka"""
+    poll_interval = int(os.getenv("CACHE_UPDATE_INTERVAL_SECONDS", "30"))
+    logger.info(f"Starting background cache updater (interval: {poll_interval}s)")
+    
+    while True:
+        try:
+            await asyncio.sleep(poll_interval)
+            await update_cache(max_messages=20)
+        except asyncio.CancelledError:
+            logger.info("Background cache updater cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in background cache updater: {e}", exc_info=True)
+            # Continue running even if there's an error
+            await asyncio.sleep(poll_interval)
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down API...")
+    
+    # Cancel background task
+    if background_task:
+        logger.info("Cancelling background cache updater...")
+        background_task.cancel()
+        try:
+            await background_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("✓ Background task cancelled")
+    
+    # Close Kafka consumer
     if kafka_consumer:
+        logger.info("Closing Kafka consumer...")
         kafka_consumer.close()
+        logger.info("✓ Kafka consumer closed")
+    
     logger.info("✓ API shutdown complete")
 
 
@@ -326,10 +373,7 @@ async def get_playlist(
         )
 
     try:
-        # Trigger an update check (pull fresh messages)
-        update_cache(max_messages=20)
-
-        # Get items from cache
+        # Get items from cache (background task keeps it updated)
         items = news_cache[language]
 
         # Filter by category if specified
@@ -454,16 +498,3 @@ async def get_languages():
     response.sort(key=lambda x: x["name"])
 
     return {"languages": response}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level=config.app.log_level.lower(),
-        access_log=True,
-    )

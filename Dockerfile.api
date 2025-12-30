@@ -39,5 +39,14 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application (timeout parameters are in main.py)
-CMD ["uv", "run", "main.py"]
+# Run with gunicorn using uvicorn workers
+# Workers: (2 * CPU) + 1 = 5 workers for 2 CPU
+# Timeout: 300s for long-running Kafka operations
+CMD ["uv", "run", "gunicorn", "main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--workers", "5", \
+     "--bind", "0.0.0.0:8000", \
+     "--timeout", "300", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--log-level", "info"]

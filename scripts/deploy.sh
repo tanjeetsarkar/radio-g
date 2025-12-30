@@ -104,7 +104,7 @@ if [ "$DEPLOYMENT_TARGET" = "local" ]; then
     
     # Start infrastructure
     echo -e "${BLUE}🏗️  Starting infrastructure services...${NC}"
-    docker compose up -d redis zookeeper kafka
+    docker compose up -d redis zookeeper kafka kafka-ui
     
     echo "⏳ Waiting for infrastructure to be ready..."
     sleep 20
@@ -474,6 +474,7 @@ STORAGE_BACKEND: "${STORAGE_BACKEND:-gcs}"
 GCS_BUCKET_NAME: "${GCS_BUCKET_NAME}"
 GCS_PROJECT_ID: "${GCP_PROJECT_ID}"
 STORAGE_RETENTION_DAYS: "${STORAGE_RETENTION_DAYS:-1}"
+CACHE_UPDATE_INTERVAL_SECONDS: "${CACHE_UPDATE_INTERVAL_SECONDS:-30}"
 EOF
     
     # Build secrets string
@@ -490,8 +491,8 @@ EOF
         --port 8000 \
         --timeout 300 \
         --cpu-boost \
-        --memory ${API_MEMORY:-1Gi} \
-        --cpu ${API_CPU:-1} \
+        --memory ${API_MEMORY:-2Gi} \
+        --cpu ${API_CPU:-2} \
         --min-instances ${API_MIN_INSTANCES:-1} \
         --max-instances ${API_MAX_INSTANCES:-10} \
         --service-account="${SERVICE_ACCOUNT_EMAIL}" \
