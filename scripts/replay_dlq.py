@@ -7,6 +7,7 @@ import os
 import json
 import logging
 import argparse
+from typing import Dict, Union, Optional
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,6 +16,7 @@ from services.kafka_consumer import NewsKafkaConsumer
 from services.kafka_producer import NewsKafkaProducer
 from models.dlq_event import DLQEvent
 from models.news_item import NewsItem
+from config.config import get_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DLQ-Replay")
@@ -22,16 +24,39 @@ logger = logging.getLogger("DLQ-Replay")
 def replay_messages(
     source_topic: str,
     target_topic: str,
-    bootstrap_servers: str,
+    kafka_bootstrap_servers: Optional[Union[str, Dict]] = None,
     max_messages: int = 10,
     dry_run: bool = False
 ):
+    config = get_config()
+    
+    # Logic to determine if we should use the full dictionary config (SASL) or just a string
+    if kafka_bootstrap_servers:
+        # If user provided an argument...
+        if kafka_bootstrap_servers == config.kafka.bootstrap_servers:
+            # If it matches the string in config, prefer the full connection dict (which includes auth)
+            kafka_config = config.kafka.connection_config
+        else:
+            # If it's different (e.g. localhost override), use it as is
+            kafka_config = kafka_bootstrap_servers
+    else:
+        # Default to full config
+        kafka_config = config.kafka.connection_config
+    
+    # Safe logging of config type
+    if isinstance(kafka_config, dict):
+        logger.info(
+            f"Kafka Config Mode: SASL/Secure (Keys: {list(kafka_config.keys())})"
+        )
+    else:
+        logger.info(f"Kafka Config Mode: Simple String ({kafka_config})")
+    
     logger.info(f"Starting DLQ Replay: {source_topic} -> {target_topic}")
     logger.info(f"Max messages: {max_messages} | Dry run: {dry_run}")
 
     # Consumer for DLQ
     consumer = NewsKafkaConsumer(
-        bootstrap_servers=bootstrap_servers,
+        bootstrap_servers=kafka_config,
         group_id="dlq-replay-group",
         auto_offset_reset="earliest",
         return_raw=True # We need the raw DLQEvent JSON
@@ -39,7 +64,7 @@ def replay_messages(
     consumer.subscribe([source_topic])
 
     # Producer for Target
-    producer = NewsKafkaProducer(bootstrap_servers=bootstrap_servers)
+    producer = NewsKafkaProducer(bootstrap_servers=kafka_config)
 
     replayed_count = 0
 
@@ -110,7 +135,9 @@ if __name__ == "__main__":
     parser.add_argument('--topic', choices=['ingestion', 'processing'], required=True, help='Which DLQ to replay')
     parser.add_argument('--max', type=int, default=10, help='Max messages to replay')
     parser.add_argument('--dry-run', action='store_true', help='Preview without sending')
-    parser.add_argument('--kafka', default='localhost:9093', help='Kafka servers')
+    
+    config = get_config()
+    parser.add_argument('--kafka', default=config.kafka.bootstrap_servers, help='Kafka servers')
 
     args = parser.parse_args()
 
@@ -125,7 +152,7 @@ if __name__ == "__main__":
     replay_messages(
         source_topic=source,
         target_topic=target,
-        bootstrap_servers=args.kafka,
+        kafka_bootstrap_servers=args.kafka,
         max_messages=args.max,
         dry_run=args.dry_run
     )
