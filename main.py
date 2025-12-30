@@ -136,7 +136,7 @@ def update_cache(max_messages: int = 50):
     for _ in range(max_messages):
         try:
             # Poll with short timeout
-            msg = kafka_consumer.consumer.poll(0.1)
+            msg = kafka_consumer.consumer.poll(5.0)
 
             if msg is None:
                 break

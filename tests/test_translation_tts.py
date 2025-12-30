@@ -315,3 +315,57 @@ class TestElevenLabsPlaceholder:
         except Exception:
             # Expected during development
             pytest.skip("ElevenLabs not implemented yet")
+
+
+@pytest.mark.unit
+@pytest.mark.mock
+class TestModelIdFeature:
+    """Test model_id parameter support in TTS service"""
+    
+    def test_service_save_with_model_id(self, temp_dir):
+        """Test saving with custom model ID"""
+        service = TTSService(provider="mock", output_dir=str(temp_dir))
+        
+        result_path = service.save_speech(
+            "Test text",
+            "en",
+            model_id="eleven_turbo_v2_5"
+        )
+        
+        assert Path(result_path).exists()
+    
+    def test_service_save_with_voice_and_model_id(self, temp_dir):
+        """Test saving with both voice_id and model_id"""
+        service = TTSService(provider="mock", output_dir=str(temp_dir))
+        
+        result_path = service.save_speech(
+            "Test text for Hindi",
+            "hi",
+            voice_id="custom-voice-id",
+            model_id="eleven_turbo_v2_5"
+        )
+        
+        assert Path(result_path).exists()
+    
+    def test_language_manager_get_model_id(self, mock_language_manager):
+        """Test LanguageManager.get_model_id() method"""
+        # The mock already has get_model_id configured
+        model_id = mock_language_manager.get_model_id('en')
+        assert model_id == 'eleven_multilingual_v2'
+    
+    def test_language_manager_fallback_model_id(self):
+        """Test that missing model_id falls back to default"""
+        from services.language_manager import LanguageManager
+        from unittest.mock import Mock, patch
+        
+        with patch.object(LanguageManager, 'get_config') as mock_get_config:
+            # Config without model_id field (backward compatibility)
+            mock_get_config.return_value = {
+                'en': {'name': 'English', 'voice_id': 'voice_en', 'enabled': True}
+            }
+            
+            manager = LanguageManager()
+            model_id = manager.get_model_id('en')
+            
+            # Should fallback to eleven_multilingual_v2
+            assert model_id == 'eleven_multilingual_v2'

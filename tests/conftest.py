@@ -45,10 +45,11 @@ def mock_language_manager():
         manager = Mock()
         # Default test config matching the previous hardcoded values
         manager.get_config.return_value = {
-            'en': {'name': 'English', 'flag': '🇬🇧', 'voice_id': 'voice_en', 'enabled': True},
-            'hi': {'name': 'Hindi', 'flag': '🇮🇳', 'voice_id': 'voice_hi', 'enabled': True},
-            'bn': {'name': 'Bengali', 'flag': '🇧🇩', 'voice_id': 'voice_bn', 'enabled': True}
+            'en': {'name': 'English', 'flag': '🇬🇧', 'voice_id': 'voice_en', 'model_id': 'eleven_multilingual_v2', 'enabled': True},
+            'hi': {'name': 'Hindi', 'flag': '🇮🇳', 'voice_id': 'voice_hi', 'model_id': 'eleven_multilingual_v2', 'enabled': True},
+            'bn': {'name': 'Bengali', 'flag': '🇧🇩', 'voice_id': 'voice_bn', 'model_id': 'eleven_multilingual_v2', 'enabled': True}
         }
+        manager.get_model_id.side_effect = lambda lang: manager.get_config.return_value.get(lang, {}).get('model_id', 'eleven_multilingual_v2')
         mock_get.return_value = manager
         yield manager
 

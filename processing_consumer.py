@@ -113,12 +113,14 @@ class NewsProcessingConsumer:
             # Step 2: Generate audio
             try:
                 voice_id = config.get("voice_id")
+                model_id = self.language_manager.get_model_id(lang_code)
                 audio_filename = f"news_{news_item.id}_{lang_code}.mp3"
                 audio_path = self.tts_service.save_speech(
                     text=translated_summary,
                     language=lang_code,
                     filename=audio_filename,
                     voice_id=voice_id,
+                    model_id=model_id,
                 )
             except Exception as e:
                 logger.error(f"  ✗ [{lang_code.upper()}] TTS failed: {e}")

@@ -22,18 +22,21 @@ SUPPORTED_LANGUAGES = {
         "name": "English",
         "flag": "ENG",
         "voice_id": "JBFqnCBsd6RMkjVDRZzb",  # George
+        "model_id": "eleven_turbo_v2_5",  # 50% cheaper, high quality
         "enabled": True
     },
     "hi": {
         "name": "Hindi",
         "flag": "HI",
         "voice_id": "zs7UfyHqCCmny7uTxCYi",  # Fin
+        "model_id": "eleven_turbo_v2_5",  # 50% cheaper, supports Hindi
         "enabled": True
     },
     "bn": {
         "name": "Bengali",
         "flag": "BEN",
         "voice_id": "c7VOtb2tmfLXLqWBCXlt",  # Fin
+        "model_id": "eleven_multilingual_v2",  # Bengali support (turbo v2.5 doesn't support Bengali yet)
         "enabled": True
     }
 }

@@ -62,16 +62,17 @@ class ElevenLabsTTSProvider(TTSProvider):
         # }
         logger.info("✓ ElevenLabs Provider initialized")
 
-    def save_speech(self, text: str, output_path: str, language: str, voice_id: Optional[str] = None) -> str:
+    def save_speech(self, text: str, output_path: str, language: str, voice_id: Optional[str] = None, model_id: Optional[str] = None) -> str:
         # voice_id = self.voices.get(language, self.voices['en'])
         final_voice_id = voice_id or 'JBFqnCBsd6RMkjVDRZzb'
+        final_model_id = model_id or self.model  # Use dynamic model_id or fallback to instance default
         
         try:
-            logger.info(f"Generating ElevenLabs audio ({language})...")
+            logger.info(f"Generating ElevenLabs audio ({language}, model: {final_model_id})...")
             audio_generator = self.client.text_to_speech.convert(
                 text=text,
                 voice_id=final_voice_id,
-                model_id=self.model
+                model_id=final_model_id
             )
             
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -102,13 +103,13 @@ class TTSService:
         else:
             self.provider = MockTTSProvider()
 
-    def save_speech(self, text: str, language: str, filename: Optional[str] = None, voice_id: Optional[str] = None) -> str:
+    def save_speech(self, text: str, language: str, filename: Optional[str] = None, voice_id: Optional[str] = None, model_id: Optional[str] = None) -> str:
         if not filename:
             filename = f"audio_{language}_{int(time.time())}.mp3"
         output_path = self.output_dir / filename
         # out = self.provider.save_speech(text, str(output_path), language)
         if isinstance(self.provider, ElevenLabsTTSProvider):
-             out = self.provider.save_speech(text, str(output_path), language, voice_id=voice_id)
+             out = self.provider.save_speech(text, str(output_path), language, voice_id=voice_id, model_id=model_id)
         else:
              out = self.provider.save_speech(text, str(output_path), language)
         try:

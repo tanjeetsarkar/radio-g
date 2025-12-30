@@ -2,6 +2,7 @@
 Script to replay messages from Dead Letter Queues (DLQ)
 back to the main processing pipeline.
 """
+import uuid
 
 import argparse
 import json
@@ -60,7 +61,7 @@ def replay_messages(
     # Consumer for DLQ
     consumer = NewsKafkaConsumer(
         bootstrap_servers=kafka_config,
-        group_id="dlq-replay-group",
+        group_id=f"dlq-replay-group-{uuid.uuid4().hex[:8]}",
         auto_offset_reset="earliest",
         return_raw=True,  # We need the raw DLQEvent JSON
     )
@@ -73,7 +74,7 @@ def replay_messages(
 
     try:
         while replayed_count < max_messages:
-            msg = consumer.consumer.poll(1.0)
+            msg = consumer.consumer.poll(5.0)
 
             if msg is None:
                 logger.info("No more messages in DLQ.")

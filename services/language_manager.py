@@ -67,6 +67,12 @@ class LanguageManager:
         config = self.get_config()
         return config.get(lang_code, {}).get("voice_id")
 
+    def get_model_id(self, lang_code: str) -> str:
+        """Get model_id for a language, fallback to default if not configured."""
+        config = self.get_config()
+        lang_config = config.get(lang_code, {})
+        return lang_config.get("model_id", "eleven_multilingual_v2")  # Fallback for backward compatibility
+
     def get_topic(self, lang_code: str) -> str:
         return f"news-{self.get_language_name(lang_code).lower()}"
 
