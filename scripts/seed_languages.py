@@ -28,14 +28,14 @@ SUPPORTED_LANGUAGES = {
     "hi": {
         "name": "Hindi",
         "flag": "HI",
-        "voice_id": "zs7UfyHqCCmny7uTxCYi",  # Fin
+        "voice_id": "FDQcYNtvPtQjNlTyU3du",  # Sumi
         "model_id": "eleven_turbo_v2_5",  # 50% cheaper, supports Hindi
         "enabled": True
     },
     "bn": {
         "name": "Bengali",
         "flag": "BEN",
-        "voice_id": "c7VOtb2tmfLXLqWBCXlt",  # Fin
+        "voice_id": "FDQcYNtvPtQjNlTyU3du",  # Sumi
         "model_id": "eleven_multilingual_v2",  # Bengali support (turbo v2.5 doesn't support Bengali yet)
         "enabled": True
     }
