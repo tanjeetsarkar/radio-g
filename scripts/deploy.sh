@@ -253,6 +253,13 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
             elif [ "$secret" = "elevenlabs-api-key" ]; then
                 echo -n "$ELEVENLABS_API_KEY" | gcloud secrets create $secret --data-file=-
             fi
+        else
+            echo -e "${BLUE}Updating $secret secret...${NC}"
+            if [ "$secret" = "gemini-api-key" ]; then
+                echo -n "$GEMINI_API_KEY" | gcloud secrets versions add $secret --data-file=-
+            elif [ "$secret" = "elevenlabs-api-key" ]; then
+                echo -n "$ELEVENLABS_API_KEY" | gcloud secrets versions add $secret --data-file=-
+            fi
         fi
     done
     
@@ -357,6 +364,13 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
         --role="roles/storage.objectViewer"
     
     echo -e "${GREEN}✅ Storage permissions configured${NC}"
+    
+    # Grant Secret Manager access to service account
+    echo -e "${BLUE}🔐 Granting Secret Manager access...${NC}"
+    gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+        --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+        --role="roles/secretmanager.secretAccessor"
+    echo -e "${GREEN}✅ Secret Manager access configured${NC}"
     
     # Build and push images
     echo ""
