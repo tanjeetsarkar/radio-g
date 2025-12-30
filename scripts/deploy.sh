@@ -289,6 +289,75 @@ elif [ "$DEPLOYMENT_TARGET" = "gcp" ]; then
     
     echo -e "${GREEN}✅ All required secrets exist${NC}"
     
+    # Setup GCS Storage Bucket
+    echo ""
+    echo -e "${BLUE}📦 Setting up GCS storage bucket...${NC}"
+    
+    # Get bucket name and retention days from environment
+    GCS_BUCKET_NAME="${GCS_BUCKET_NAME:-radio-g-audio-${GCP_PROJECT_ID}}"
+    STORAGE_RETENTION_DAYS="${STORAGE_RETENTION_DAYS:-1}"
+    
+    # Check if bucket exists
+    if ! gcloud storage buckets describe gs://$GCS_BUCKET_NAME &>/dev/null; then
+        echo -e "${YELLOW}⚠️  Bucket 'gs://$GCS_BUCKET_NAME' not found. Creating...${NC}"
+        gcloud storage buckets create gs://$GCS_BUCKET_NAME \
+            --location=$GCP_REGION \
+            --uniform-bucket-level-access
+        echo -e "${GREEN}✅ Created bucket: gs://$GCS_BUCKET_NAME${NC}"
+    else
+        echo -e "${GREEN}✅ Bucket already exists: gs://$GCS_BUCKET_NAME${NC}"
+    fi
+    
+    # Apply lifecycle policy
+    echo -e "${BLUE}⏰ Applying lifecycle policy (${STORAGE_RETENTION_DAYS}-day retention)...${NC}"
+    
+    # Create temporary lifecycle config with substituted retention days
+    LIFECYCLE_TEMP="/tmp/gcs_lifecycle_${GCP_PROJECT_ID}.json"
+    cat config/gcs_lifecycle.json | sed "s/\"age\": 1/\"age\": ${STORAGE_RETENTION_DAYS}/" > $LIFECYCLE_TEMP
+    
+    gcloud storage buckets update gs://$GCS_BUCKET_NAME \
+        --lifecycle-file=$LIFECYCLE_TEMP
+    
+    rm -f $LIFECYCLE_TEMP
+    echo -e "${GREEN}✅ Lifecycle policy applied (${STORAGE_RETENTION_DAYS} days)${NC}"
+    
+    # Make bucket publicly readable
+    echo -e "${BLUE}🌐 Setting public read access...${NC}"
+    gcloud storage buckets add-iam-policy-binding gs://$GCS_BUCKET_NAME \
+        --member=allUsers \
+        --role=roles/storage.objectViewer
+    echo -e "${GREEN}✅ Public read access configured${NC}"
+    
+    # Create service account for storage access
+    echo -e "${BLUE}👤 Setting up service account...${NC}"
+    
+    SERVICE_ACCOUNT_NAME="radio-g-storage-sa"
+    SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_NAME}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+    
+    if ! gcloud iam service-accounts describe $SERVICE_ACCOUNT_EMAIL &>/dev/null; then
+        echo -e "${YELLOW}⚠️  Service account not found. Creating...${NC}"
+        gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \
+            --display-name="Radio-G Storage Service Account"
+        echo -e "${GREEN}✅ Created service account: $SERVICE_ACCOUNT_EMAIL${NC}"
+    else
+        echo -e "${GREEN}✅ Service account already exists: $SERVICE_ACCOUNT_EMAIL${NC}"
+    fi
+    
+    # Grant storage permissions to service account
+    echo -e "${BLUE}🔐 Granting storage permissions...${NC}"
+    
+    # Grant objectCreator (write) permission
+    gcloud storage buckets add-iam-policy-binding gs://$GCS_BUCKET_NAME \
+        --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+        --role="roles/storage.objectCreator"
+    
+    # Grant objectViewer (read) permission for retry verification
+    gcloud storage buckets add-iam-policy-binding gs://$GCS_BUCKET_NAME \
+        --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+        --role="roles/storage.objectViewer"
+    
+    echo -e "${GREEN}✅ Storage permissions configured${NC}"
+    
     # Build and push images
     echo ""
     echo -e "${BLUE}🔨 Building and pushing Docker images...${NC}"
@@ -387,6 +456,10 @@ KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP}"
 TRANSLATION_PROVIDER: "${TRANSLATION_PROVIDER:-gemini}"
 TTS_PROVIDER: "${TTS_PROVIDER:-elevenlabs}"
 ALLOWED_ORIGINS: "${ALLOWED_ORIGINS}"
+STORAGE_BACKEND: "${STORAGE_BACKEND:-gcs}"
+GCS_BUCKET_NAME: "${GCS_BUCKET_NAME}"
+GCS_PROJECT_ID: "${GCP_PROJECT_ID}"
+STORAGE_RETENTION_DAYS: "${STORAGE_RETENTION_DAYS:-1}"
 EOF
     
     # Build secrets string
@@ -407,6 +480,7 @@ EOF
         --cpu ${API_CPU:-1} \
         --min-instances ${API_MIN_INSTANCES:-1} \
         --max-instances ${API_MAX_INSTANCES:-10} \
+        --service-account="${SERVICE_ACCOUNT_EMAIL}" \
         --env-vars-file=/tmp/api-env-vars.yaml \
         --set-secrets="${API_SECRETS}"
     
@@ -439,7 +513,8 @@ EOF
         --cpu ${PROCESSOR_CPU:-2} \
         --min-instances ${PROCESSOR_MIN_INSTANCES:-1} \
         --max-instances ${PROCESSOR_MAX_INSTANCES:-10} \
-        --set-env-vars="${COMMON_ENV_VARS},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs},GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT},GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global},GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-True}" \
+        --service-account="${SERVICE_ACCOUNT_EMAIL}" \
+        --set-env-vars="${COMMON_ENV_VARS},TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-gemini},TTS_PROVIDER=${TTS_PROVIDER:-elevenlabs},GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT},GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global},GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-True},STORAGE_BACKEND=${STORAGE_BACKEND:-gcs},GCS_BUCKET_NAME=${GCS_BUCKET_NAME},GCS_PROJECT_ID=${GCP_PROJECT_ID},STORAGE_RETENTION_DAYS=${STORAGE_RETENTION_DAYS}" \
         --set-secrets="${PROCESSOR_SECRETS}"
     
     echo -e "${GREEN}✅ Processor deployed${NC}"

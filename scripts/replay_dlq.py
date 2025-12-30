@@ -1,6 +1,7 @@
 """
 Script to replay messages from Dead Letter Queues (DLQ)
 back to the main processing pipeline.
+Supports replaying GCS upload failures.
 """
 import uuid
 
@@ -9,6 +10,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Dict, Optional, Union
 
 # Add parent directory to path
@@ -16,9 +18,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.config import get_config
 from models.dlq_event import DLQEvent
-from models.news_item import NewsItem
+from models.news_item import NewsItem, ProcessedNewsItem
 from services.kafka_consumer import NewsKafkaConsumer
 from services.kafka_producer import NewsKafkaProducer
+from services.storage_service import StorageService, StorageUploadError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DLQ-Replay")
@@ -30,6 +33,8 @@ def replay_messages(
     kafka_bootstrap_servers: Optional[Union[str, Dict]] = None,
     max_messages: int = 10,
     dry_run: bool = False,
+    stage_filter: Optional[str] = None,
+    storage_service: Optional[StorageService] = None,
 ):
     config = get_config()
 
@@ -91,10 +96,107 @@ def replay_messages(
                 dlq_event = DLQEvent.from_dict(event_data)
 
                 logger.info(
-                    f"Read DLQ Event: {dlq_event.event_id} (Error: {dlq_event.error_message})"
+                    f"Read DLQ Event: {dlq_event.event_id} "
+                    f"(Stage: {dlq_event.stage}, Error: {dlq_event.error_message})"
                 )
+                
+                # Apply stage filter if specified
+                if stage_filter and dlq_event.stage != stage_filter:
+                    logger.debug(f"Skipping event {dlq_event.event_id}: stage mismatch")
+                    continue
+                
+                # Handle GCS upload failures specially
+                if dlq_event.stage == "gcs_upload":
+                    if not storage_service:
+                        logger.warning(
+                            f"Skipping GCS upload event {dlq_event.event_id}: "
+                            "storage_service not provided"
+                        )
+                        continue
+                    
+                    try:
+                        payload = dlq_event.payload or {}
+                        local_path = Path(payload.get("local_path", ""))
+                        filename = payload.get("filename", "")
+                        language = payload.get("language", "")
+                        news_item_dict = payload.get("news_item", {})
+                        translated_summary = payload.get("translated_summary", "")
+                        
+                        if not local_path.exists():
+                            logger.warning(
+                                f"Skipping event {dlq_event.event_id}: "
+                                f"local file not found: {local_path}"
+                            )
+                            continue
+                        
+                        # Retry GCS upload
+                        logger.info(f"Retrying GCS upload for {filename}")
+                        gcs_url = storage_service.upload_audio_file(
+                            local_path=local_path,
+                            remote_name=filename,
+                            language=language,
+                            metadata={"news_id": news_item_dict.get("id")}
+                        )
+                        
+                        # Upload successful - create ProcessedNewsItem and send to target
+                        if not dry_run:
+                            # Reconstruct ProcessedNewsItem
+                            word_count = len(translated_summary.split())
+                            estimated_duration = (word_count / 150) * 60
+                            
+                            processed_item = ProcessedNewsItem(
+                                original_id=news_item_dict.get("id"),
+                                original_title=news_item_dict.get("title"),
+                                original_url=news_item_dict.get("url"),
+                                category=news_item_dict.get("category"),
+                                source=news_item_dict.get("source"),
+                                published_date=news_item_dict.get("published_date"),
+                                language=language,
+                                summary=translated_summary,
+                                translated_summary=translated_summary,
+                                audio_file=gcs_url,
+                                audio_duration=round(estimated_duration, 2),
+                                processed_at=news_item_dict.get("processed_at", ""),
+                                processing_provider="replay",
+                                tts_provider="replay",
+                            )
+                            
+                            # Send to appropriate language topic
+                            lang_topic = f"news-{language}"
+                            producer.producer.produce(
+                                topic=lang_topic,
+                                key=processed_item.original_id.encode("utf-8"),
+                                value=processed_item.to_json().encode("utf-8")
+                            )
+                            
+                            # Delete local file after successful upload
+                            storage_service.delete_local_file(local_path)
+                            
+                            logger.info(
+                                f"-> Successfully replayed GCS upload for {filename} to {lang_topic}"
+                            )
+                        else:
+                            logger.info(
+                                f"-> [DRY RUN] Would replay GCS upload for {filename}"
+                            )
+                        
+                        replayed_count += 1
+                        
+                    except StorageUploadError as e:
+                        logger.error(
+                            f"GCS upload still failing for event {dlq_event.event_id}: {e}"
+                        )
+                        continue
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to process GCS upload event {dlq_event.event_id}: {e}"
+                        )
+                        continue
+                    
+                    # Skip to next message (already handled)
+                    continue
 
-                # Check if payload contains a valid NewsItem
+                # Check if payload contains a valid NewsItem (original replay logic)
                 payload = dlq_event.payload or {}
 
                 # Reconstruct NewsItem depending on what's in payload
@@ -157,6 +259,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dry-run", action="store_true", help="Preview without sending"
     )
+    parser.add_argument(
+        "--stage", type=str, help="Filter by DLQ stage (e.g., gcs_upload, tts_en)"
+    )
 
     config = get_config()
     parser.add_argument(
@@ -172,6 +277,18 @@ if __name__ == "__main__":
     }
 
     source, target = TOPIC_MAP[args.topic]
+    
+    # Initialize storage service if needed (for GCS upload retries)
+    storage_service = None
+    if args.stage == "gcs_upload" or args.stage is None:
+        # Initialize storage service for GCS upload retries
+        storage_service = StorageService(
+            backend=config.app.storage_backend,
+            local_dir=Path(config.app.audio_output_dir),
+            gcs_bucket_name=config.app.gcs_bucket_name,
+            gcs_project_id=config.app.gcs_project_id,
+        )
+        logger.info(f"Initialized storage service: {config.app.storage_backend}")
 
     replay_messages(
         source_topic=source,
@@ -179,4 +296,6 @@ if __name__ == "__main__":
         kafka_bootstrap_servers=args.kafka,
         max_messages=args.max,
         dry_run=args.dry_run,
+        stage_filter=args.stage,
+        storage_service=storage_service,
     )

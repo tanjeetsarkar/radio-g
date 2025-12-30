@@ -187,6 +187,17 @@ services:
       # Processing settings
       MAX_WORKERS: ${MAX_WORKERS:-4}
       AUDIO_OUTPUT_DIR: /app/audio_output
+      
+      # Storage Configuration
+      # For local dev: STORAGE_BACKEND=local (uses volume mount below)
+      # For GCS testing: STORAGE_BACKEND=gcs (requires GCP credentials)
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-}
+      GCS_PROJECT_ID: ${GCS_PROJECT_ID:-}
+      STORAGE_RETENTION_DAYS: ${STORAGE_RETENTION_DAYS:-1}
+      # Note: For GCS in local Docker, mount credentials file:
+      # - ./application_default_credentials.json:/app/application_default_credentials.json:ro
+      # and set: GOOGLE_APPLICATION_CREDENTIALS=/app/application_default_credentials.json
     volumes:
       - ./audio_output:/app/audio_output
       - ./logs:/app/logs
@@ -233,6 +244,12 @@ services:
       # API settings
       PORT: 8000
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      
+      # Storage Configuration
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-}
+      GCS_PROJECT_ID: ${GCS_PROJECT_ID:-}
+      STORAGE_RETENTION_DAYS: ${STORAGE_RETENTION_DAYS:-1}
     volumes:
       - ./audio_output:/app/audio_output:ro
       - ./logs:/app/logs

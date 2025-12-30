@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.127.0",
     "feedparser>=6.0.12",
     "flake8>=7.3.0",
+    "google-cloud-storage>=3.7.0",
     "google-genai>=1.56.0",
     "isort>=7.0.0",
     "lxml[html-clean]>=6.0.2",

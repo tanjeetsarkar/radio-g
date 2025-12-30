@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Optional, Union
 from datetime import datetime
 import os
+from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 
@@ -9,6 +10,7 @@ from services.kafka_consumer import NewsKafkaConsumer
 from services.kafka_producer import NewsKafkaProducer
 from services.translation_service import TranslationService
 from services.tts_service import TTSService
+from services.storage_service import StorageService, StorageUploadError
 from services.language_manager import get_language_manager
 from models.news_item import NewsItem, ProcessedNewsItem
 from models.dlq_event import DLQEvent
@@ -27,6 +29,7 @@ class NewsProcessingConsumer:
         translation_api_key: Optional[str] = None,
         tts_api_key: Optional[str] = None,
         output_dir: str = "audio_output",
+        storage_service: Optional[StorageService] = None,
     ):
         logger.info("INITIALIZING NEWS PROCESSING CONSUMER")
         
@@ -54,6 +57,9 @@ class NewsProcessingConsumer:
             api_key=tts_api_key, 
             output_dir=output_dir
         )
+        
+        # Initialize storage service
+        self.storage_service = storage_service
 
         self.stats = {
             "messages_processed": 0,
@@ -110,7 +116,7 @@ class NewsProcessingConsumer:
 
             translated_summary = result["translated_summary"]
 
-            # Step 2: Generate audio
+            # Step 2: Generate audio (locally)
             try:
                 voice_id = config.get("voice_id")
                 model_id = self.language_manager.get_model_id(lang_code)
@@ -139,6 +145,48 @@ class NewsProcessingConsumer:
                 self.stats["messages_failed"] += 1
                 self.stats["dlq_events_sent"] += 1
                 continue
+            
+            # Step 3: Upload to storage backend (GCS or local)
+            final_audio_path = audio_path  # Default to local path
+            if self.storage_service:
+                try:
+                    # Upload to storage and get public URL (or local path)
+                    final_audio_path = self.storage_service.upload_audio_file(
+                        local_path=Path(audio_path),
+                        remote_name=audio_filename,
+                        language=lang_code,
+                        metadata={"news_id": news_item.id, "source": news_item.source}
+                    )
+                    
+                    # Delete local file after successful upload (saves disk space)
+                    if self.storage_service.backend == "gcs":
+                        deleted = self.storage_service.delete_local_file(Path(audio_path))
+                        if deleted:
+                            logger.debug(f"  ✓ Deleted local file: {audio_path}")
+                    
+                    logger.info(f"  ✓ [{lang_code.upper()}] Uploaded to storage: {final_audio_path}")
+                    
+                except StorageUploadError as e:
+                    logger.error(f"  ✗ [{lang_code.upper()}] Storage upload failed: {e}")
+                    # Send to DLQ for retry
+                    dlq_event = DLQEvent(
+                        original_id=news_item.id,
+                        source=news_item.source,
+                        stage="gcs_upload",
+                        error_message=str(e),
+                        payload={
+                            "language": lang_code,
+                            "local_path": audio_path,
+                            "filename": audio_filename,
+                            "news_item": news_item.to_dict(),
+                            "translated_summary": translated_summary,
+                        },
+                    )
+                    self.producer.produce_dlq_event("dlq-processing", dlq_event)
+                    self.stats["messages_failed"] += 1
+                    self.stats["dlq_events_sent"] += 1
+                    # Keep local file for retry via DLQ replay
+                    continue
 
             # Calculate duration
             word_count = len(translated_summary.split())
@@ -154,7 +202,7 @@ class NewsProcessingConsumer:
                 language=lang_code,
                 summary=result["summary"],
                 translated_summary=translated_summary,
-                audio_file=audio_path,
+                audio_file=final_audio_path,  # GCS URL or local path
                 audio_duration=round(estimated_duration, 2),
                 processed_at=datetime.now().isoformat(),
                 processing_provider=self.translation_service.provider_name,
@@ -303,6 +351,15 @@ def main():
     kafka_config = args.kafka
     if args.kafka == config.kafka.bootstrap_servers:
         kafka_config = config.kafka.connection_config
+    
+    # Initialize storage service based on configuration
+    storage_service = StorageService(
+        backend=config.app.storage_backend,
+        local_dir=Path(config.app.audio_output_dir),
+        gcs_bucket_name=config.app.gcs_bucket_name,
+        gcs_project_id=config.app.gcs_project_id,
+    )
+    logger.info(f"Storage backend: {config.app.storage_backend}")
 
     consumer = NewsProcessingConsumer(
         kafka_config=kafka_config,
@@ -311,6 +368,7 @@ def main():
         translation_api_key=config.api.gemini_api_key,
         tts_api_key=config.api.elevenlabs_api_key,
         output_dir=config.app.audio_output_dir,
+        storage_service=storage_service,
     )
 
     # Graceful shutdown handler

@@ -3,7 +3,7 @@ import uuid
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 from datetime import datetime
@@ -371,8 +371,26 @@ async def get_playlist(
 
 @app.get("/audio/{filename}")
 async def get_audio(filename: str):
-    """Stream audio file"""
+    """Stream audio file or redirect to GCS URL"""
     try:
+        # Check if any processed item has this audio file
+        # First check if it's a GCS URL (stored in cache)
+        for items in news_cache.values():
+            for item in items:
+                # item is a dict (ProcessedNewsItem serialized)
+                audio_file = item.get("audio_file", "") if isinstance(item, dict) else getattr(item, "audio_file", "")
+                # If audio_file is a full GCS URL, redirect to it
+                if audio_file and audio_file.startswith("https://"):
+                    # Extract filename from URL and compare
+                    if filename in audio_file:
+                        logger.info(f"Redirecting to GCS URL: {audio_file}")
+                        return RedirectResponse(url=audio_file, status_code=302)
+                # If audio_file is just filename, check if it matches
+                elif audio_file and audio_file.endswith(filename):
+                    # It's a local file, serve it
+                    break
+        
+        # Fallback to serving from local filesystem
         audio_dir = Path(config.app.audio_output_dir)
         audio_path = audio_dir / filename
 

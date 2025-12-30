@@ -63,6 +63,11 @@ class AppConfig:
     max_workers: int = 4
     fetch_interval_minutes: int = 15
     enable_deduplication: bool = True
+    # GCS Storage Configuration
+    storage_backend: str = "local"  # "local" or "gcs"
+    gcs_bucket_name: Optional[str] = None
+    gcs_project_id: Optional[str] = None
+    storage_retention_days: int = 1
 
 
 class Config:
@@ -148,7 +153,11 @@ class Config:
             audio_output_dir=os.getenv("AUDIO_OUTPUT_DIR", "audio_output"),
             max_workers=int(os.getenv("MAX_WORKERS", "4")),
             fetch_interval_minutes=int(os.getenv("FETCH_INTERVAL_MINUTES", "15")),
-            enable_deduplication=os.getenv("ENABLE_DEDUPLICATION", "true").lower() == "true"
+            enable_deduplication=os.getenv("ENABLE_DEDUPLICATION", "true").lower() == "true",
+            storage_backend=os.getenv("STORAGE_BACKEND", "local"),
+            gcs_bucket_name=os.getenv("GCS_BUCKET_NAME"),
+            gcs_project_id=os.getenv("GCS_PROJECT_ID"),
+            storage_retention_days=int(os.getenv("STORAGE_RETENTION_DAYS", "1"))
         )
     
     def is_production(self) -> bool:
