@@ -1,0 +1,47 @@
+graph LR
+    %% --- Styling ---
+    classDef google fill:#e8f0fe,stroke:#4285F4,stroke-width:2px,color:#1967d2;
+    classDef partner fill:#fce8e6,stroke:#ea4335,stroke-width:2px,color:#c5221f;
+    classDef ext fill:#fff,stroke:#333,stroke-width:1px,stroke-dasharray: 5 5;
+
+    %% --- Nodes ---
+    subgraph Sources [1. Ingestion Layer]
+        RSS(RSS Feeds):::ext
+        Fetcher[News Fetcher<br/>Cloud Run]:::google
+        RedisDedup[(Redis Cache<br/>Deduplication)]:::partner
+    end
+
+    subgraph EventBus [2. Event Bus The Nervous System]
+        Kafka{{"Confluent Kafka<br/>(Streaming Topics)"}}:::partner
+    end
+
+    subgraph Intelligence [3. Processing Layer]
+        Processor[News Processor<br/>Cloud Run]:::google
+        Gemini(Google Gemini<br/>Translation & Summary):::google
+        Eleven(ElevenLabs<br/>Text-to-Speech):::ext
+        GCS[("Cloud Storage<br/>Audio Files")]:::google
+    end
+
+    subgraph Delivery [4. Delivery Layer]
+        API[API Service<br/>Fan-Out Consumer]:::google
+        Frontend[Next.js UI<br/>Radio Interface]:::google
+        User((Listener)):::ext
+    end
+
+    %% --- Connections ---
+    RSS -->|Polls| Fetcher
+    Fetcher <-->|Checks Hash| RedisDedup
+    Fetcher -->|1. Raw Event| Kafka
+
+    Kafka -->|2. Consume Raw| Processor
+    Processor <-->|GenAI| Gemini
+    Processor <-->|Synthesize| Eleven
+    Processor -->|Save MP3| GCS
+    Processor -->|3. Processed Event| Kafka
+
+    Kafka -->|4. Stream Updates| API
+    API <-->|Serve Content| Frontend
+    Frontend -->|Play Audio| User
+
+    %% --- Legend ---
+    linkStyle 2,6,10 stroke:#ea4335,stroke-width:3px;
