@@ -7,6 +7,9 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Multilingual News Radio',
   description: 'Live news broadcasts in multiple languages powered by AI',
+  icons: {
+    icon: '/favicon.svg'
+  }
 }
 
 export default function RootLayout({
