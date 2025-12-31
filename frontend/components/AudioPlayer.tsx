@@ -466,11 +466,6 @@ export default function AudioPlayer({
 
               {/* Right: Volume */}
               <div className="w-1/4 flex items-center justify-end gap-3">
-                {isMock && (
-                  <span className="text-xs text-yellow-400 mr-2" title="Development Mode: Mock audio">
-                    ⚠️ Mock
-                  </span>
-                )}
                 <Volume2 className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden="true" />
                 <input
                   type="range"
