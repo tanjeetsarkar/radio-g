@@ -523,6 +523,7 @@ async def get_languages():
                     "code": code,
                     "name": details.get("name", code.title()),
                     "flag": details.get("flag", "🌐"),
+                    "native_name": details.get("native_name"),
                     "items": len(news_cache[code]),
                 }
             )
