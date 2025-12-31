@@ -248,7 +248,7 @@
 - **Audio Files/Day**: ~1500
 - **Test Coverage**: 75%
 
-### Q1 2025 Goals
+### Q1 2026 Goals
 - **Uptime**: 99.9%
 - **Languages**: 6+
 - **RSS Sources**: 25+
@@ -257,7 +257,7 @@
 - **Users**: 100 beta testers
 - **Test Coverage**: 85%
 
-### Q2 2025 Goals
+### Q2 2026 Goals
 - **Uptime**: 99.95%
 - **Languages**: 10+
 - **RSS Sources**: 50+
