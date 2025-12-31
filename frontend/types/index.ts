@@ -7,6 +7,7 @@ export interface NewsItem {
   language: string;
   summary: string;
   translated_summary: string;
+  translated_title: string;
   audio_file: string;
   audio_duration: number;
   published_date: string;
@@ -22,6 +23,7 @@ export interface Playlist {
 export interface Language {
   code: string;
   name: string;
+  native_name?: string;
   flag: string; // Added flag property
   items: number;
 }

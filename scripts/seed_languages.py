@@ -20,21 +20,24 @@ logger = logging.getLogger(__name__)
 SUPPORTED_LANGUAGES = {
     "en": {
         "name": "English",
-        "flag": "ENG",
+        "native_name": "English",
+        "flag": "🇬🇧",
         "voice_id": "JBFqnCBsd6RMkjVDRZzb",  # George
         "model_id": "eleven_turbo_v2_5",  # 50% cheaper, high quality
         "enabled": True
     },
     "hi": {
         "name": "Hindi",
-        "flag": "HI",
+        "native_name": "हिन्दी",
+        "flag": "🇮🇳",
         "voice_id": "FDQcYNtvPtQjNlTyU3du",  # Sumi
         "model_id": "eleven_turbo_v2_5",  # 50% cheaper, supports Hindi
         "enabled": True
     },
     "bn": {
         "name": "Bengali",
-        "flag": "BEN",
+        "native_name": "বাংলা",
+        "flag": "🇮🇳",
         "voice_id": "FDQcYNtvPtQjNlTyU3du",  # Sumi
         "model_id": "eleven_multilingual_v2",  # Bengali support (turbo v2.5 doesn't support Bengali yet)
         "enabled": True

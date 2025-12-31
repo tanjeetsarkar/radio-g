@@ -95,7 +95,7 @@ class NewsProcessingConsumer:
             try:
                 # 1. Translate
                 result = self.translation_service.translate_and_summarize(
-                    text=text_to_process, target_language=lang_code, max_length=200
+                    text=text_to_process, target_language=lang_code, max_length=200, title=news_item.title
                 )
             except Exception as e:
                 logger.error(f"  ✗ [{lang_code.upper()}] Translation failed: {e}")
@@ -202,6 +202,7 @@ class NewsProcessingConsumer:
                 language=lang_code,
                 summary=result["summary"],
                 translated_summary=translated_summary,
+                translated_title=result.get("translated_title", news_item.title),
                 audio_file=final_audio_path,  # GCS URL or local path
                 audio_duration=round(estimated_duration, 2),
                 processed_at=datetime.now().isoformat(),

@@ -58,6 +58,7 @@ class NewsItemResponse(BaseModel):
     language: str
     summary: str
     translated_summary: str
+    translated_title: Optional[str]
     audio_file: str
     audio_duration: float
     published_date: str
@@ -388,22 +389,35 @@ async def get_playlist(
         # Convert to response format
         response_items = []
         for item in items:
-            response_items.append(
-                NewsItemResponse(
-                    id=item.original_id,
-                    title=item.original_title,
-                    url=item.original_url,
-                    category=item.category,
-                    source=item.source,
-                    language=item.language,
-                    summary=item.summary,
-                    translated_summary=item.translated_summary,
-                    audio_file=Path(item.audio_file).name,
-                    audio_duration=item.audio_duration,
-                    published_date=item.published_date,
-                    processed_at=item.processed_at,
-                )
-            )
+            # Handle backward compatibility - cache may have ProcessedNewsItem objects or dicts
+            try:
+                # Extract values safely handling both formats
+                if isinstance(item, ProcessedNewsItem):
+                    translated_title = item.translated_title or item.original_title
+                    response_items.append(
+                        NewsItemResponse(
+                            id=item.original_id or "",
+                            title=item.original_title,
+                            url=item.original_url,
+                            category=item.category,
+                            source=item.source,
+                            language=item.language,
+                            summary=item.summary,
+                            translated_summary=item.translated_summary,
+                            translated_title=translated_title,
+                            audio_file=Path(item.audio_file).name,
+                            audio_duration=item.audio_duration,
+                            published_date=item.published_date,
+                            processed_at=item.processed_at,
+                        )
+                    )
+                else:
+                    # Handle dict format (shouldn't happen but for safety)
+                    logger.warning("Cache contains dict format, should be ProcessedNewsItem")
+                    continue
+            except Exception as e:
+                logger.error(f"Error converting item to response: {e}", exc_info=True)
+                continue
 
         return PlaylistResponse(
             language=language, total_items=len(response_items), items=response_items
@@ -421,8 +435,13 @@ async def get_audio(filename: str):
         # First check if it's a GCS URL (stored in cache)
         for items in news_cache.values():
             for item in items:
-                # item is a dict (ProcessedNewsItem serialized)
-                audio_file = item.get("audio_file", "") if isinstance(item, dict) else getattr(item, "audio_file", "")
+                # Handle ProcessedNewsItem objects
+                if isinstance(item, ProcessedNewsItem):
+                    audio_file = item.audio_file
+                else:
+                    # Skip invalid cache entries
+                    continue
+                
                 # If audio_file is a full GCS URL, redirect to it
                 if audio_file and audio_file.startswith("https://"):
                     # Extract filename from URL and compare
@@ -431,29 +450,43 @@ async def get_audio(filename: str):
                         return RedirectResponse(url=audio_file, status_code=302)
                 # If audio_file is just filename, check if it matches
                 elif audio_file and audio_file.endswith(filename):
-                    # It's a local file, serve it
+                    # It's a local file, continue to serve it
                     break
         
         # Fallback to serving from local filesystem
+        # audio_output/ is for production audio files
         audio_dir = Path(config.app.audio_output_dir)
         audio_path = audio_dir / filename
 
         if not audio_path.exists():
-            raise HTTPException(status_code=404, detail="Audio file not found")
+            logger.warning(f"Audio file not found: {audio_path}")
+            raise HTTPException(status_code=404, detail=f"Audio file not found: {filename}")
 
-        # Handle mock files for dev/testing
+        # Handle mock files for dev/testing (0-byte files with .json metadata)
         if audio_path.stat().st_size == 0:
             metadata_path = audio_path.with_suffix(".json")
             if metadata_path.exists():
                 with open(metadata_path, "r") as f:
                     metadata = json.load(f)
+                logger.info(f"Returning mock audio metadata for: {filename}")
                 return {
                     "message": "Mock audio file",
                     "filename": filename,
                     "metadata": metadata,
                 }
+            else:
+                logger.warning(f"Empty audio file without metadata: {filename}")
+                raise HTTPException(status_code=404, detail="Audio file is empty and has no metadata")
 
-        return FileResponse(audio_path, media_type="audio/mpeg", filename=filename)
+        # Serve real audio file with proper headers for streaming
+        return FileResponse(
+            audio_path,
+            media_type="audio/mpeg",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": f"inline; filename={filename}"
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:

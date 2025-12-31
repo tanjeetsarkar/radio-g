@@ -29,7 +29,7 @@ export default function LanguageSelector({
         >
           <span className="text-2xl">{lang.flag || '🌐'}</span>
           <div className="flex-1 text-left">
-            <div className="font-medium">{lang.name}</div>
+            <div className="font-medium">{lang.native_name || lang.name}</div>
             <div className="text-xs opacity-70">{lang.code.toUpperCase()}</div>
           </div>
           {selectedLanguage === lang.code && (

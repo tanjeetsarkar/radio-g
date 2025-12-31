@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Radio, RefreshCw, Globe } from 'lucide-react';
 import AudioPlayer from '@/components/AudioPlayer';
 import LanguageSelector from '@/components/LanguageSelector';
@@ -16,10 +16,22 @@ export default function Home() {
   const [currentTrack, setCurrentTrack] = useState<NewsItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoPlay, setAutoPlay] = useState(true); // Default enabled
+  const [isPlaying, setIsPlaying] = useState(false);
+  const autoPlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load auto-play preference from localStorage
+  useEffect(() => {
+    const savedAutoPlay = localStorage.getItem('autoPlay');
+    if (savedAutoPlay !== null) {
+      setAutoPlay(savedAutoPlay === 'true');
+    }
+  }, []);
 
   // 1. Fetch available languages on mount
   useEffect(() => {
     loadLanguages();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -52,8 +64,8 @@ export default function Home() {
       if (!currentTrack && data.items.length > 0) {
         setCurrentTrack(data.items[0]);
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load playlist');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load playlist');
       console.error('Error loading playlist:', err);
     } finally {
       setLoading(false);
@@ -79,6 +91,8 @@ export default function Home() {
 
   const handleTrackSelect = (track: NewsItem) => {
     setCurrentTrack(track);
+    // Force play when user explicitly selects a track
+    setIsPlaying(true);
   };
 
   const handleNext = () => {
@@ -97,8 +111,45 @@ export default function Home() {
     setCurrentTrack(playlist[previousIndex]);
   };
 
+  const handleAudioEnded = () => {
+    // Clear any existing timeout
+    if (autoPlayTimeoutRef.current) {
+      clearTimeout(autoPlayTimeoutRef.current);
+    }
+
+    if (!autoPlay || !currentTrack || playlist.length === 0) return;
+    
+    const currentIndex = playlist.findIndex(item => item.id === currentTrack.id);
+    
+    // Stop if we're at the last item
+    if (currentIndex >= playlist.length - 1) {
+      return;
+    }
+    
+    // Wait 2 seconds before playing next track
+    autoPlayTimeoutRef.current = setTimeout(() => {
+      const nextIndex = currentIndex + 1;
+      setCurrentTrack(playlist[nextIndex]);
+    }, 2000);
+  };
+
+  const handleToggleAutoPlay = () => {
+    const newValue = !autoPlay;
+    setAutoPlay(newValue);
+    localStorage.setItem('autoPlay', String(newValue));
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoPlayTimeoutRef.current) {
+        clearTimeout(autoPlayTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 pb-32 lg:pb-24">
       {/* Header */}
       <header className="bg-black/20 backdrop-blur-sm border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -134,7 +185,7 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column: Language Selector & Player */}
+          {/* Left Column: Language Selector & Stats */}
           <div className="lg:col-span-1 space-y-6">
             {/* Language Selector */}
             <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6">
@@ -146,15 +197,6 @@ export default function Home() {
                 selectedLanguage={selectedLanguage}
                 languages={languages} // Pass dynamic languages
                 onLanguageChange={setSelectedLanguage}
-              />
-            </div>
-
-            {/* Audio Player */}
-            <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6">
-              <AudioPlayer
-                currentTrack={currentTrack}
-                onNext={handleNext}
-                onPrevious={handlePrevious}
               />
             </div>
 
@@ -210,6 +252,18 @@ export default function Home() {
           <p className="mt-1">Powered by Confluent, Gemini & ElevenLabs</p>
         </div>
       </footer>
+
+      {/* Sticky Bottom Audio Player */}
+      <AudioPlayer
+        currentTrack={currentTrack}
+        onNext={handleNext}
+        onPrevious={handlePrevious}
+        onEnded={handleAudioEnded}
+        autoPlay={autoPlay}
+        onToggleAutoPlay={handleToggleAutoPlay}
+        isPlaying={isPlaying}
+        setIsPlaying={setIsPlaying}
+      />
     </div>
   );
 }

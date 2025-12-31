@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class TranslationOutput(BaseModel):
     summary: str = Field(description="A concise summary of the article in English")
     translated_summary: str = Field(description="The summary translated into the target language")
+    translated_title: str = Field(description="The article title translated into the target language")
     target_language: str = Field(description="The language code of the translation")
 
 class TranslationProvider(ABC):
@@ -36,7 +37,7 @@ class MockTranslationProvider(TranslationProvider):
         self.call_count = 0
         logger.info("✓ Mock Translation Provider initialized")
     
-    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150) -> Dict[str, str]:
+    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150, title: str = "") -> Dict[str, str]:
         self.call_count += 1
         time.sleep(0.1)
         summary = text[:max_length] + "..."
@@ -54,6 +55,7 @@ class MockTranslationProvider(TranslationProvider):
             'original': text[:50],
             'summary': summary,
             'translated_summary': f"{prefix} {marker} {summary}",
+            'translated_title': f"{prefix} Mock Translated Title",
             'target_language': target_language,
             'provider': 'mock'
         }
@@ -75,13 +77,16 @@ class GeminiTranslationProvider(TranslationProvider):
         self.client = genai.Client(http_options=HttpOptions(api_version="v1"))
         logger.info(f"✓ Gemini Translation Provider initialized (model: {model})")
     
-    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150) -> Dict[str, str]:
+    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 150, title: str = "") -> Dict[str, str]:
         self.call_count += 1
         
         prompt = f"""
         You are a news editor. 
         1. Summarize the article for a radio broadcast (approx {max_length} chars).
         2. Translate that summary into {target_language}.
+        3. Translate the article title into {target_language}.
+        
+        Article title: {title}
         """
         
         try:
@@ -104,6 +109,7 @@ class GeminiTranslationProvider(TranslationProvider):
                 'original': text[:100] + "...",
                 'summary': data.summary,
                 'translated_summary': data.translated_summary,
+                'translated_title': data.translated_title,
                 'target_language': data.target_language,
                 'provider': 'gemini'
             }
@@ -129,13 +135,13 @@ class TranslationService:
         else:
             self.provider = MockTranslationProvider()
         
-    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 200) -> Dict[str, str]:
+    def translate_and_summarize(self, text: str, target_language: str, max_length: int = 200, title: str = "") -> Dict[str, str]:
         # Simple caching
-        key = hashlib.md5(f"{text[:50]}:{target_language}".encode()).hexdigest()
+        key = hashlib.md5(f"{text[:50]}:{target_language}:{title}".encode()).hexdigest()
         if key in self.cache:
             return self.cache[key]
             
-        result = self.provider.translate_and_summarize(text, target_language, max_length)
+        result = self.provider.translate_and_summarize(text, target_language, max_length, title=title)
         self.call_count += 1
 
         self.cache[key] = result

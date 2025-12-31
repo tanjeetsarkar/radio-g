@@ -69,6 +69,7 @@ class ProcessedNewsItem:
     processed_at: str
     processing_provider: str
     tts_provider: str
+    translated_title: Optional[str] = None
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))

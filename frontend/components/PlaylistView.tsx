@@ -1,6 +1,6 @@
 'use client';
 
-import { Clock, Play } from 'lucide-react';
+import { Clock, Play, ExternalLink } from 'lucide-react';
 import type { NewsItem } from '@/types';
 
 interface PlaylistViewProps {
@@ -73,13 +73,26 @@ export default function PlaylistView({ items, currentTrack, onTrackSelect }: Pla
 
               {/* Content */}
               <div className="flex-1 min-w-0 space-y-2">
-                <div>
-                  <h4 className={`font-medium truncate ${isCurrentTrack ? 'text-blue-300' : 'text-white'}`}>
-                    {item.title}
-                  </h4>
-                  <p className="text-sm text-gray-400 mt-1 line-clamp-2">
-                    {item.translated_summary}
-                  </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <h4 className={`font-medium truncate ${isCurrentTrack ? 'text-blue-300' : 'text-white'}`}>
+                      {item.translated_title || item.title}
+                    </h4>
+                    <p className="text-sm text-gray-400 mt-1 line-clamp-2">
+                      {item.translated_summary}
+                    </p>
+                  </div>
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-shrink-0 p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                    aria-label="Read full article"
+                    title="Read Full Article"
+                  >
+                    <ExternalLink className="w-4 h-4 text-gray-400 hover:text-blue-400" />
+                  </a>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
