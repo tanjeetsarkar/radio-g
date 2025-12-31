@@ -130,6 +130,7 @@ export default function Home() {
     autoPlayTimeoutRef.current = setTimeout(() => {
       const nextIndex = currentIndex + 1;
       setCurrentTrack(playlist[nextIndex]);
+      setIsPlaying(true);
     }, 2000);
   };
 
