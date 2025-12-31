@@ -29,7 +29,6 @@ export default function AudioPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.7);
-  const [isMock, setIsMock] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [dragStartY, setDragStartY] = useState<number | null>(null);
   const [dragCurrentY, setDragCurrentY] = useState<number | null>(null);
@@ -41,18 +40,6 @@ export default function AudioPlayer({
       const audioUrl = newsApi.getAudioUrl(currentTrack.audio_file);
       audioRef.current.src = audioUrl;
       audioRef.current.load();
-      
-      // Check if it's a mock file by examining Content-Type header
-      // Only mock responses return JSON, real audio returns audio/mpeg
-      fetch(audioUrl, { method: 'HEAD' })
-        .then(res => {
-          const contentType = res.headers.get('content-type');
-          setIsMock(contentType?.includes('application/json') || false);
-        })
-        .catch(() => {
-          // If HEAD fails, assume it's real audio
-          setIsMock(false);
-        });
       
       // Auto-play when track changes if isPlaying is true
       if (isPlaying) {
@@ -365,14 +352,6 @@ export default function AudioPlayer({
               <ExternalLink className="w-4 h-4" aria-hidden="true" />
               <span>Read Full Article</span>
             </a>
-
-            {isMock && (
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
-                <p className="text-xs text-yellow-200">
-                  ⚠️ Development Mode: Mock audio (no actual audio file)
-                </p>
-              </div>
-            )}
           </div>
         </div>
 
